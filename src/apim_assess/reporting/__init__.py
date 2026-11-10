@@ -1,0 +1,1 @@
+"""Self-contained offline reporting."""

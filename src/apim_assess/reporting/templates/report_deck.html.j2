@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+<title>APIM assessment - Iteration 1</title>
+<script>
+  (() => {
+    const param = new URLSearchParams(window.location.search).get("scoutTheme");
+    const theme =
+      param || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    document.documentElement.setAttribute("data-theme", theme);
+  })();
+</script>
+<style>
+:root {
+  color-scheme: light;
+  --cp-bg: #f7f4ef;
+  --cp-bg-elevated: #fcfbf8;
+  --cp-surface: #ffffff;
+  --cp-surface-soft: #f5f5f5;
+  --cp-border: #dedede;
+  --cp-border-strong: #919191;
+  --cp-text: #242424;
+  --cp-text-muted: #5c5c5c;
+  --cp-text-soft: #6f6f6f;
+  --cp-accent: #b11f4b;
+  --cp-accent-hover: #9a1a41;
+  --cp-accent-soft: rgba(177, 31, 75, 0.08);
+  --cp-accent-fg: #ffffff;
+  --cp-success: #16a34a;
+  --cp-danger: #dc2626;
+  --cp-warning: #f59e0b;
+  --cp-link: #0078d4;
+  --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.12);
+  --cp-overlay: rgba(255, 255, 255, 0.8);
+  --cp-panel: rgba(255, 255, 255, 0.86);
+  --cp-panel-strong: rgba(255, 255, 255, 0.96);
+  --cp-sheen: rgba(255, 255, 255, 0.55);
+  --cp-highlight: rgba(177, 31, 75, 0.12);
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --cp-bg: #3d3b3a;
+  --cp-bg-elevated: #343231;
+  --cp-surface: #292929;
+  --cp-surface-soft: #2e2e2e;
+  --cp-border: #474747;
+  --cp-border-strong: #5f5f5f;
+  --cp-text: #dedede;
+  --cp-text-muted: #919191;
+  --cp-text-soft: #b0b0b0;
+  --cp-accent: #fd8ea1;
+  --cp-accent-hover: #fb7b91;
+  --cp-accent-soft: rgba(253, 142, 161, 0.14);
+  --cp-accent-fg: #1a1a1a;
+  --cp-success: #4ade80;
+  --cp-danger: #f87171;
+  --cp-warning: #fbbf24;
+  --cp-link: #4da6ff;
+  --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+  --cp-overlay: rgba(41, 41, 41, 0.88);
+  --cp-panel: rgba(41, 41, 41, 0.72);
+  --cp-panel-strong: rgba(41, 41, 41, 0.96);
+  --cp-sheen: rgba(255, 255, 255, 0.04);
+  --cp-highlight: rgba(253, 142, 161, 0.12);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--cp-bg); color: var(--cp-text); font: 16px/1.5 "Segoe UI", Aptos, Calibri, -apple-system, BlinkMacSystemFont, sans-serif; }
+header, footer { padding: 16px 32px; background: var(--cp-bg-elevated); border-bottom: 1px solid var(--cp-border); display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
+header { position: sticky; top: 0; z-index: 1; }
+header strong { margin-right: auto; }
+main { max-width: 1440px; margin: auto; padding: 32px; }
+.slide { min-height: 65vh; }
+.eyebrow { color: var(--cp-accent); text-transform: uppercase; letter-spacing: 0.12em; font-weight: 600; }
+h1 { font-size: clamp(2rem, 5vw, 4rem); line-height: 1.1; max-width: 1000px; }
+h2 { font-size: 2rem; }
+h3 { margin-top: 0; }
+.muted, small { color: var(--cp-text-muted); }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
+.card, article, .notice { padding: 24px; border: 1px solid var(--cp-border); background: var(--cp-surface); border-radius: 16px; margin-bottom: 16px; }
+.score { font-size: 2.5rem; color: var(--cp-accent); }
+.notice { border-left: 4px solid var(--cp-warning); }
+button, select { font: inherit; background: var(--cp-surface); color: var(--cp-text); border: 1px solid var(--cp-border-strong); border-radius: 0.625rem; padding: 8px 12px; }
+button { cursor: pointer; }
+button:hover { background: var(--cp-accent-soft); }
+button:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid var(--cp-accent); outline-offset: 4px; }
+button:disabled { cursor: default; color: var(--cp-text-muted); }
+a { color: var(--cp-link); overflow-wrap: anywhere; }
+code { font-family: Consolas, "Courier New", Courier, monospace; overflow-wrap: anywhere; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+th, td { padding: 12px; border-bottom: 1px solid var(--cp-border); text-align: left; vertical-align: top; }
+th { color: var(--cp-text-muted); }
+.pass { color: var(--cp-success); }
+.fail { color: var(--cp-danger); }
+.unknown, .unsupported { color: var(--cp-text-muted); }
+.badge { font-weight: 700; text-transform: uppercase; }
+svg { width: 100%; max-width: 600px; height: auto; color: var(--cp-text); }
+.node { fill: var(--cp-surface-soft); stroke: var(--cp-border-strong); }
+.edge { stroke: var(--cp-accent); stroke-width: 2; }
+svg text { fill: var(--cp-text); font-size: 15px; }
+[hidden] { display: none !important; }
+footer { justify-content: center; border-top: 1px solid var(--cp-border); }
+@media print {
+  header, footer { display: none; }
+  main { padding: 0; }
+  .scope:not([hidden]) .slide[hidden] { display: block !important; }
+  .slide { break-before: page; min-height: 0; }
+  article { break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+<header>
+  <strong>apim-assess / steel thread</strong>
+  <label for="scope-select">Scope</label>
+  <select id="scope-select">
+    {% for scope in scopes %}<option value="{{ loop.index0 }}">{{ scope.title }}</option>{% endfor %}
+  </select>
+  <button id="theme" type="button">Toggle theme</button>
+  <button id="fullscreen" type="button">Fullscreen</button>
+</header>
+<main>
+{% for scope in scopes %}
+<div class="scope" id="scope-{{ loop.index0 }}">
+  <section class="slide">
+    <p class="eyebrow">Iteration 1 / assessment scope</p>
+    <h1>API Management<br>{{ scope.title }} readout</h1>
+    <p>{{ scope.instances | length }} instance(s) / collected {{ snapshot.collected_at.isoformat() }}</p>
+    <p class="muted">Telemetry: {{ snapshot.telemetry_start.isoformat() }} to {{ snapshot.telemetry_end.isoformat() }} (UTC)</p>
+    <div class="notice">Five seed rules only. This is not a full five-pillar or MCSB compliance assessment.
+      Unknown and unsupported signals are never treated as passes. Policy, adjacent-network,
+      upstream WAF and AI gateway analysis are outside this iteration.</div>
+    {% for instance in scope.instances %}
+    <article>
+      <h3>{{ instance.name }}</h3>
+      <code>{{ instance.resource_id }}</code>
+      <p>{{ instance.environment }} ({{ instance.environment_source }}); core collection: {{ instance.core_status }}</p>
+    </article>
+    {% endfor %}
+    <h3>Collection warnings</h3>
+    {% for warning in snapshot.collection_warnings %}
+      {% if scope.portfolio or warning.resource_id == scope.instances[0].resource_id or warning.module == "discovery" %}
+      <p><strong>{{ warning.module }} / {{ warning.code }}</strong>: {{ warning.message }} <code>{{ warning.resource_id }}</code></p>
+      {% endif %}
+    {% else %}<p>No collection warnings recorded.</p>{% endfor %}
+  </section>
+  <section class="slide">
+    <p class="eyebrow">Executive scorecard / {{ scope.title }}</p>
+    <h2>Health of the assessed controls</h2>
+    <div class="cards">
+      {% for score in scope.scores %}
+      <div class="card">
+        <h3>{{ score.pillar }}</h3>
+        <div class="score">{{ score.score if score.score is not none else "N/A" }}</div>
+        <p>{{ score.passed }} pass / {{ score.failed }} fail<br>{{ score.unknown }} unknown<br>{{ score.unsupported }} unsupported / {{ score.not_applicable }} not applicable</p>
+        {% if score.score is none %}<small>Not assessed; not a healthy score.</small>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    <p>Scores use severity-weighted passes divided by known pass/fail results only.
+      Critical=5, High=4, Medium=3, Low=2, Advisory=1. Portfolio scores weight individual
+      results, not instance averages. Coverage counts above must accompany every score.</p>
+    <p class="muted">OPS has no seed rule. No overall MCSB compliance or policy coverage score is claimed.</p>
+  </section>
+  <section class="slide">
+    <p class="eyebrow">Topology &amp; metrics / {{ scope.title }}</p>
+    <h2>Collected gateway configuration</h2>
+    {% for instance in scope.instances %}
+    <article>
+      <h3>{{ instance.name }}</h3>
+      <svg viewBox="0 0 600 90" role="img" aria-label="Logical gateway topology, not verified reachability">
+        <rect class="node" x="4" y="12" width="160" height="64" rx="10"></rect>
+        <text x="20" y="49">Clients</text>
+        <line class="edge" x1="164" y1="44" x2="220" y2="44"></line>
+        <rect class="node" x="220" y="12" width="370" height="64" rx="10"></rect>
+        <text x="236" y="49">APIM / {{ instance.sku.name if instance.sku else "uncollected SKU" }}</text>
+      </svg>
+      <p>Primary region: {{ instance.location or "Not collected" }} /
+        Units: {{ instance.sku.capacity if instance.sku and instance.sku.capacity is not none else "Not collected" }} /
+        Zones: {{ instance.zones if instance.zones is not none else "Not collected" }}</p>
+      <p>Additional locations: {{ instance.additional_locations if instance.additional_locations is not none else "Not collected" }}</p>
+      <p>VNet mode: {{ instance.virtual_network_type or "Not collected" }} /
+        Public network access: {{ instance.public_network_access or "Not collected" }} /
+        Private endpoint states: {{ instance.private_endpoint_statuses if instance.private_endpoint_statuses is not none else "Not collected" }}</p>
+      <p class="muted">Logical configuration only. No NSG, WAF, routing or runtime reachability was verified.</p>
+      <div class="table-wrap">
+      <table>
+        <thead><tr><th>Metric / region</th><th>Status</th><th>Samples</th><th>Mean hourly average</th><th>Peak maximum</th><th>Total</th></tr></thead>
+        <tbody>
+        {% for metric in metric_summary(instance) %}
+        <tr><td>{{ metric.name }} / {{ metric.location }} ({{ metric.unit }})</td><td>{{ metric.status }}</td><td>{{ metric.samples }}</td><td>{{ metric.average }}</td><td>{{ metric.maximum }}</td><td>{{ metric.total }}</td></tr>
+        {% else %}<tr><td colspan="6">No telemetry collected.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </article>
+    {% endfor %}
+  </section>
+  <section class="slide">
+    <p class="eyebrow">Rule results / {{ scope.title }}</p>
+    <h2>Evidence &amp; remediation</h2>
+    {% for finding in scope.findings %}
+    <article>
+      <p><span class="badge {{ finding.result.outcome }}">{{ finding.result.outcome }}</span> / {{ finding.severity }} / {{ finding.rule.pillar }} / {{ finding.rule.id }}</p>
+      <h3>{{ finding.rule.title }}</h3>
+      <code>{{ finding.resource_id }}</code>
+      <p>{{ finding.result.summary }}</p>
+      {% for evidence in finding.result.evidence %}<p><strong>{{ evidence.source }}</strong>: {{ evidence.detail }}</p>{% endfor %}
+      <p><strong>Business impact:</strong> {{ finding.rule.business_impact }}</p>
+      <p><strong>Remediation:</strong> {{ finding.rule.remediation }}</p>
+      <p><strong>Applicability:</strong> {{ finding.rule.applicability }}</p>
+      {% if finding.rule.mcsb_controls %}<p>MCSB mapping (partial configuration evidence): {{ finding.rule.mcsb_controls | join(", ") }}</p>{% endif %}
+      {% for reference in finding.rule.references %}<p><a href="{{ reference }}" rel="noreferrer">{{ reference }}</a></p>{% endfor %}
+    </article>
+    {% else %}<p>No rule results.</p>{% endfor %}
+  </section>
+</div>
+{% endfor %}
+</main>
+<footer>
+  <button id="previous" type="button">Previous</button>
+  <span id="position" aria-live="polite"></span>
+  <button id="next" type="button">Next</button>
+  <small>Arrow keys / Space to navigate. F for fullscreen.</small>
+  <span id="status" role="status"></span>
+</footer>
+<script>
+(() => {
+  const scopes = [...document.querySelectorAll(".scope")];
+  const select = document.getElementById("scope-select");
+  let page = 0;
+  function show() {
+    scopes.forEach((scope, index) => {
+      scope.hidden = index !== Number(select.value);
+      scope.querySelectorAll(".slide").forEach((slide, position) => {
+        slide.hidden = position !== page;
+      });
+    });
+    document.getElementById("position").textContent = `Slide ${page + 1} of 4`;
+    document.getElementById("previous").disabled = page === 0;
+    document.getElementById("next").disabled = page === 3;
+  }
+  function move(delta) { page = Math.max(0, Math.min(3, page + delta)); show(); window.scrollTo(0, 0); }
+  async function fullscreen() {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await document.documentElement.requestFullscreen();
+    } catch {
+      document.getElementById("status").textContent = "Fullscreen is unavailable in this browser.";
+    }
+  }
+  select.addEventListener("change", () => { page = 0; show(); });
+  document.getElementById("previous").addEventListener("click", () => move(-1));
+  document.getElementById("next").addEventListener("click", () => move(1));
+  document.getElementById("fullscreen").addEventListener("click", fullscreen);
+  document.getElementById("theme").addEventListener("click", () => {
+    document.documentElement.dataset.theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  });
+  document.addEventListener("keydown", event => {
+    if (event.altKey || event.ctrlKey || event.metaKey || /^(SELECT|INPUT|BUTTON|TEXTAREA)$/.test(event.target.tagName)) return;
+    if (event.key === "ArrowRight" || event.key === " ") { event.preventDefault(); move(1); }
+    if (event.key === "ArrowLeft") { event.preventDefault(); move(-1); }
+    if (event.key.toLowerCase() === "f") fullscreen();
+  });
+  show();
+})();
+</script>
+</body>
+</html>
