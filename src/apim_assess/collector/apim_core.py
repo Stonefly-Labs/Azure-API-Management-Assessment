@@ -17,6 +17,8 @@ from apim_assess.collector.governance import collect_governance
 from apim_assess.collector.networking import collect_networking
 from apim_assess.collector.subresources import SubresourceCollector
 from apim_assess.collector.telemetry import collect_logs, collect_metrics
+from apim_assess.collector.upstream_afd import collect_afd
+from apim_assess.collector.upstream_appgw import collect_appgw
 from apim_assess.config import AssessmentConfig
 from apim_assess.models.snapshot import (
     CollectionWarning,
@@ -29,6 +31,7 @@ from apim_assess.models.snapshot import (
     Sku,
     Snapshot,
 )
+from apim_assess.models.upstream import Upstream
 
 SAFE_CUSTOM_PROPERTIES = {
     "Microsoft.WindowsAzure.ApiManagement.Gateway.Protocols.Server.Http2",
@@ -234,6 +237,10 @@ async def _collect(config: AssessmentConfig, reader: ArmReader) -> Snapshot:
     start = end - timedelta(days=config.telemetry.lookback_days)
     warnings: list[CollectionWarning] = []
     identifiers = await discover(reader, config, warnings)
+    upstream_scope = sorted(
+        {*(identifier.split("/")[2] for identifier in identifiers), *config.targets.subscriptions},
+        key=str.casefold,
+    )
     semaphore = asyncio.Semaphore(4)
 
     async def one(identifier: str) -> Instance:
@@ -316,6 +323,15 @@ async def _collect(config: AssessmentConfig, reader: ArmReader) -> Snapshot:
                     config.telemetry,
                     enabled=config.modules.log_analytics_kql,
                 )
+                afd, appgw = await asyncio.gather(
+                    collect_afd(
+                        reader, instance, body, config.modules.afd, upstream_scope, warnings
+                    ),
+                    collect_appgw(
+                        reader, instance, body, config.modules.appgw, upstream_scope, warnings
+                    ),
+                )
+                instance.upstream = Upstream(afd=afd, appgw=appgw)
             return instance
 
     instances = await asyncio.gather(*(one(identifier) for identifier in identifiers))

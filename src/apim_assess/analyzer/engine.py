@@ -5,6 +5,7 @@ import yaml
 from pydantic import TypeAdapter
 
 from apim_assess.analyzer.evaluators.adjacent_checks import ADJACENT_CHECKS
+from apim_assess.analyzer.evaluators.ai_gateway import AI_CHECKS
 from apim_assess.analyzer.evaluators.checks import Context
 from apim_assess.analyzer.evaluators.cost import low_capacity
 from apim_assess.analyzer.evaluators.performance import saturation
@@ -13,6 +14,7 @@ from apim_assess.analyzer.evaluators.policy_checks import POLICY_CHECKS
 from apim_assess.analyzer.evaluators.reliability import developer_sku, zone_redundancy
 from apim_assess.analyzer.evaluators.security import network_posture
 from apim_assess.analyzer.evaluators.service_checks import SERVICE_CHECKS
+from apim_assess.analyzer.evaluators.upstream_checks import UPSTREAM_CHECKS
 from apim_assess.analyzer.policy_resolver import resolve
 from apim_assess.artifacts import digest
 from apim_assess.models.findings import (
@@ -54,7 +56,12 @@ ITERATION_4_IDS = {
     "APIM-OPS-005",
     "APIM-PERF-005",
 }
-CATALOG_CHECKS = SERVICE_CHECKS | POLICY_CHECKS | ADJACENT_CHECKS
+ITERATION_5_IDS = {
+    "APIM-SEC-004",
+    "APIM-SEC-005",
+    *(f"APIM-AIGW-{number:03}" for number in range(1, 6)),
+}
+CATALOG_CHECKS = SERVICE_CHECKS | POLICY_CHECKS | ADJACENT_CHECKS | AI_CHECKS | UPSTREAM_CHECKS
 
 
 def load_rules() -> list[Rule]:

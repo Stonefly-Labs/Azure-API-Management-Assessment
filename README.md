@@ -1,11 +1,12 @@
 # apim-assess
 
-Read-only Azure API Management assessment CLI. **Iterations 1-4**: core
+Read-only Azure API Management assessment CLI. **Iterations 1-5**: core
 configuration, Azure Monitor metrics, sanitized sub-resource inventory,
-effective XML policies, 47 deterministic rules, linked networking/governance
+effective XML policies, 54 deterministic rules, linked networking/governance
 metadata, optional aggregate Log Analytics queries, validated rule
 waivers/thresholds, and a self-contained HTML deck and deep-dive explorer
-with effective policy and partial MCSB coverage matrices.
+with effective policy and partial MCSB coverage matrices, optional upstream
+WAF probes, LLM/GraphQL checks, a remediation roadmap and container packaging.
 
 ## Install
 
@@ -17,7 +18,7 @@ python -m venv .venv
 .\.venv\Scripts\apim-assess --help
 ```
 
-Only `collect` and `assess` require Azure credentials. Authenticate using a
+Only collection and explicitly requested AI enrichment use remote services. Authenticate using a
 method supported by `DefaultAzureCredential` (for example `az login`).
 This iteration supports Azure public cloud only. Supply authorized targets;
 the tool never enumerates all subscriptions in an account.
@@ -42,7 +43,8 @@ values. Explicit IDs and discovered services are combined case-insensitively.
 Resource-group filters apply to discovery, not explicit IDs. Discovery uses
 paginated ARM service list operations (the plan's ARM fallback), without a
 Resource Graph dependency. Azure resource reads are HTTP GET except the
-documented, read-only Policy Insights `latest/queryResults` POST. The reader
+documented, read-only Policy Insights `latest/queryResults` POST and the
+opt-in, scoped Resource Graph query POST. The reader
 does not expose a general resource-write operation.
 
 `--config assessment.example.yaml` accepts only implemented options.
@@ -82,7 +84,7 @@ No Azure access is required:
 
 The fixture intentionally contains unavailable/partial telemetry. N/A and
 unknown results are meaningful, not missing demo functionality. Open the
-HTML file locally; its portfolio/instance selector, six slides, keyboard
+HTML file locally; its portfolio/instance selector, eight slides, keyboard
 navigation, explorer and theme toggle need no external runtime assets. Learn reference
 links are optional outbound navigation, not runtime dependencies.
 
@@ -238,9 +240,9 @@ is absent but explicit HTTP(S) transport metadata is present, the matrix
 labels the assessment as HTTP gateway policies only. The type stays null:
 no API type or protocol-specific GraphQL resolver coverage is invented.
 
-New artifacts use schema `1.3`. Schema `1.0`/`1.1`/`1.2` snapshots still analyze
+New artifacts use schema `1.4`. Schema `1.0`/`1.1`/`1.2`/`1.3` snapshots still analyze
 offline using available evidence. Their original digest contracts and
-five-/eleven-/forty-rule findings remain reportable without reinterpreting scores.
+historical 5-, 11-, 40-, and 47-rule findings remain reportable without reinterpreting scores.
 
 These are assessment heuristics, not autoscale actions. Hourly averages can
 hide shorter peaks; their p95 is not a request latency percentile. Right-sizing
@@ -277,9 +279,92 @@ PERF-005), extends SEC-006 runtime evidence, and retains the existing report
 and deterministic scoring contracts. Secondary-region custom alerting
 (REL-005) and gateway node health (OPS-006) remain deferred: neither is
 included in Iteration 4's collector acceptance list, and neither is inferred
-from inventory. Iteration 5 retains upstream
-WAF-dependent SEC-002/004/005, AI Gateway rules, narrative enrichment, roadmap
-and Docker. These modules/rules are not stubbed or silently accepted.
+from inventory. SEC-002 remains deferred rather than duplicating SEC-004/005
+or claiming that WAF existence proves every direct public path restricted.
+
+### Iteration 5: upstream WAF and modern workloads
+
+Both `modules.afd` and `modules.appgw` are disabled by default. When enabled,
+`auto_discover: true` queries **only assessment subscriptions** for AFD
+Standard/Premium profiles or Application Gateways. `resource_ids` adds
+explicit targets, including authorized cross-subscription targets; set
+`auto_discover: false` for explicit-only probing. No subscription enumeration,
+DNS traversal, external origin requests, inference calls or configuration
+changes occur. Resource Graph reads use `2024-04-01`; AFD routes/associations
+use `2025-04-15`, Front Door WAF `2022-05-01`, and AppGW `2026-01-01`.
+
+Matching uses APIM gateway/custom Proxy hostnames and reported public/private
+IP addresses in memory; saved artifacts contain hashed edge/route references,
+not those endpoints, IPs, rule match conditions or raw response bodies.
+AFD probes bind active origins to routes and WAF domain associations covering
+all paths. AppGW probes resolve basic and path routing, honoring path-policy
+over listener-policy over gateway-policy precedence, including legacy WAF
+configuration. Unresolved AFD rule-set/AppGW rewrite routing and partial
+path associations cannot establish complete protection. HTTPS forwarding, explicit health probes, bot rules and
+rate-limiting presence are report context, not independent enforcement claims.
+AFD Classic and other CDN profile kinds are not supported.
+
+| Rules | Configuration decision and limit |
+| --- | --- |
+| SEC-004 | Every observed matched route/domain needs an enabled Prevention WAF with a blocking managed ruleset. Exclusions, rule-group overrides and custom bypass/log rules remain unknown. No observed match never proves WAF absence: permissions, DNS indirection and cross-subscription topology may hide paths. |
+| SEC-005 | Require regional APIM NSGs permitting only the observed AppGW subnet or `AzureFrontDoor.Backend` on TCP 443 before broad denials for both 80/443. AFD also requires an exact literal, hashed `X-Azure-FDID` check in every effective API context with a rejecting HTTP code. Conditional/dynamic or named-value headers, ip-filter, mTLS and other unproven alternatives remain unknown, not passes. Internal/public-disabled ingress is N/A for this public-origin check; private callers still need review. |
+| AIGW-001 | Recognized LLM endpoints require effective fixed positive token-rate or quota budgets, a counter key and explicit estimation behavior. Gateway-local counters, concurrency and provider/schema support limit runtime conclusions. Consumption token limits are unsupported. |
+| AIGW-002 | Azure OpenAI routes require unconditional system-assigned managed identity for the Cognitive Services audience without static API-key credentials, including URL/query bindings. Custom token-variable handling, user-assigned identity linkage, header/query rewrites and workspace capability gaps stay unknown/unsupported. No Azure identity requirement is imposed on third-party LLM providers. |
+| AIGW-003 | Every Azure OpenAI route must select a pool with at least two distinct collected members, each with a positive-duration/threshold 429 breaker accepting Retry-After. Cycles, missing members and dynamic routing cannot pass; Consumption breakers are unsupported. This does not establish model equivalence, usable deployment capacity or successful failover. |
+| AIGW-004 | Require effective token metric emission with a literal namespace and an Application Insights logger. This does not prove custom metrics enablement, ingestion, token accuracy or billing/chargeback completeness. |
+| AIGW-005 | Explicit GraphQL APIs need effective inbound validation with positive size (at most 100 KiB) and depth limits; omitted depth uses the documented default 6. Operation-scoped placement cannot pass. Microsoft policy-reference and gateway-matrix workspace support claims conflict, so that boundary is unsupported rather than assumed healthy. Resolver field authorization is not inspected. |
+
+Endpoint detection recognizes documented Azure OpenAI/Foundry and selected
+LLM provider hostnames, not API names. Generic custom endpoints without a
+recognized model URL are not positively classified as AI workloads; dynamic
+or missing evidence stays unknown. Pool membership and final route overrides
+are resolved within declaration namespaces. Old snapshots without endpoint
+classifications can be replayed but cannot manufacture AI coverage.
+
+The roadmap groups unwaived confirmed failures deterministically by severity:
+Critical/High in 0-30 days, Medium in 30-60, Low/Advisory in 60-90+. These are
+planning heuristics, not effort estimates, assigned owners or delivery
+commitments. Unknown/unsupported evidence remains visible in the explorer.
+
+### Optional executive commentary
+
+`analyze --enrich-ai --config assessment.yaml` and `assess --enrich-ai` opt in
+to a remote narrative. Configuration alone never enables it. Azure OpenAI
+uses the configured public-cloud endpoint/deployment and chat completions
+`2024-10-21`; provide an API key through the named environment variable or
+use `DefaultAzureCredential` with inference access. An `openai_compatible`
+base endpoint (typically ending in `/v1`) requires the named key environment
+variable. Never place keys in YAML, arguments or committed files. Use a
+compatible non-reasoning chat deployment supporting JSON mode, temperature
+and max_tokens; model feature differences surface as explicit errors.
+
+Only aggregate counts grouped by public rule ID, pillar, severity, outcome
+and waiver presence are transmitted. No identifiers, API paths, policies,
+evidence, waiver text or customer data are sent. The bounded plain-text
+response is saved separately as **unverified portfolio commentary**;
+it cannot change findings, evidence, applicability, severity or scores.
+No automatic retry incurs extra inference requests. Failed/refused/truncated
+enrichment records a safe error, saves deterministic artifacts, and exits 2
+(`assess` also renders the report). Offline `report` never calls AI.
+
+### Container
+
+```powershell
+docker build --tag apim-assess:local .
+docker run --rm --network none apim-assess:local --help
+docker run --rm --network none -v "${PWD}\tests\fixtures:/input:ro" -v "${PWD}\output:/output" apim-assess:local analyze --snapshot /input/sample_multi_apim_snapshot.json --output /output/findings.json
+docker run --rm --network none -v "${PWD}\tests\fixtures:/input:ro" -v "${PWD}\output:/output" apim-assess:local report --snapshot /input/sample_multi_apim_snapshot.json --findings /output/findings.json --output /output/report.html
+```
+
+The multi-stage image runs as non-root UID/GID 10001, with no build tools,
+source fixtures or credentials copied into the runtime. Grant the output
+mount appropriate host permissions. Collection can use workload identity or
+service-principal environment variables supported by DefaultAzureCredential;
+do not bake credentials into images. A host Azure CLI token-cache mount
+alone is insufficient: this minimal image deliberately does not install
+Azure CLI. Relative default outputs are `output/...` under the container's
+`/output` working directory; use explicit absolute output paths as above.
+CI builds the image and replays analysis/reporting with networking disabled.
 
 ## Development and verification
 
@@ -299,7 +384,11 @@ and credentials: run `assess` above, review `collection_warnings`, and inspect
 the three local artifacts. In addition to APIM read access, enabled modules
 need read access to linked networking, diagnostic settings, subscription
 autoscale/Defender plan, service API collections and Policy Insights states.
-Optional KQL requires query access to linked workspaces. Permission gaps
+Optional KQL requires query access to linked workspaces. Optional upstream
+discovery/probing needs scoped Resource Graph access and read permission on
+AFD/AppGW, their linked WAF policies and any inspected NSGs/subnets.
+Optional AI enrichment needs inference permission on the explicitly
+configured deployment. Permission gaps
 are expected structured evidence, not a reason to grant write access.
 Do not retrieve keys or change resource
 configuration to unblock collection. Live verification is a separate

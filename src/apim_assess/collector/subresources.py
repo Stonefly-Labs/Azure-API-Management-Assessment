@@ -8,7 +8,13 @@ from urllib.parse import quote
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from apim_assess.collector.client import ArmReader, AzureReadError
-from apim_assess.collector.sanitizer import reference_id, sanitize_policy, value_kind
+from apim_assess.collector.sanitizer import (
+    ai_backend_kind,
+    reference_id,
+    sanitize_policy,
+    url_api_key,
+    value_kind,
+)
 from apim_assess.models.policy import (
     CollectionCoverage,
     Inventory,
@@ -79,6 +85,8 @@ def _metadata(kind: Kind, props: dict[str, object]) -> ResourceMetadata:
             "oauth_configured": bool(authentication.get("oAuth2") or authentication.get("openid")),
             "version_set": bool(props.get("apiVersionSetId")),
             "api_route_hash": (reference_id(route) if isinstance(route, str) else None),
+            "ai_backend": ai_backend_kind(props.get("serviceUrl")),
+            "api_key_credential": url_api_key(props.get("serviceUrl")),
         }
     elif kind == "operation":
         projected = {"method": props.get("method")}
@@ -95,6 +103,41 @@ def _metadata(kind: Kind, props: dict[str, object]) -> ResourceMetadata:
             if "services" in pool
             else None
         )
+        breaker = _object(props.get("circuitBreaker"))
+        breaker_rules = TypeAdapter(list[dict[str, object]]).validate_python(
+            breaker.get("rules", [])
+        )
+        covers_429 = False
+        retry_after = False
+        for rule in breaker_rules:
+            condition = _object(rule.get("failureCondition"))
+            ranges = TypeAdapter(list[dict[str, int]]).validate_python(
+                condition.get("statusCodeRanges", [])
+            )
+            count = condition.get("count")
+            percentage = condition.get("percentage")
+            threshold = any(
+                isinstance(value, (int, float)) and not isinstance(value, bool) and 0 < value
+                for value in (count, percentage)
+            )
+            interval = condition.get("interval")
+            trip = rule.get("tripDuration")
+            durations = all(
+                isinstance(value, str)
+                and re.fullmatch(r"P(?=\w)(?:\d+D)?(?:T(?=\w)(?:\d+H)?(?:\d+M)?(?:\d+S)?)?", value)
+                and re.search(r"[1-9]", value)
+                for value in (interval, trip)
+            )
+            valid = (
+                threshold
+                and durations
+                and any(part.get("min", 0) <= 429 <= part.get("max", 0) for part in ranges)
+            )
+            covers_429 = covers_429 or bool(valid)
+            retry_after = retry_after or bool(valid and rule.get("acceptRetryAfter") is True)
+        credentials = _object(props.get("credentials"))
+        headers = _object(credentials.get("header"))
+        queries = _object(credentials.get("query"))
         projected = {
             "service_url_kind": value_kind(props.get("url")),
             "credentials_present": bool(props.get("credentials")),
@@ -105,6 +148,22 @@ def _metadata(kind: Kind, props: dict[str, object]) -> ResourceMetadata:
             ),
             "validate_certificate_chain": tls.get("validateCertificateChain"),
             "validate_certificate_name": tls.get("validateCertificateName"),
+            "ai_backend": ai_backend_kind(props.get("url")),
+            "api_key_credential": (
+                True
+                if any(
+                    key.casefold() in {"api-key", "x-api-key", "key", "api_key"}
+                    for key in (*headers, *queries)
+                )
+                else url_api_key(props.get("url"))
+            ),
+            "pool_member_references": (
+                sorted({reference_id(member.id.casefold()) for member in members})
+                if members is not None
+                else None
+            ),
+            "breaker_429": covers_429,
+            "breaker_retry_after": retry_after,
         }
     elif kind == "certificate":
         projected = {

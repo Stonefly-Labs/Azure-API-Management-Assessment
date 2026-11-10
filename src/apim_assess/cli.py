@@ -11,17 +11,18 @@ import yaml
 from pydantic import ValidationError
 from rich.console import Console
 
+from apim_assess.analyzer.ai_narrator import NarrativeError, enrich
 from apim_assess.analyzer.engine import analyze
 from apim_assess.artifacts import write_model, write_text
 from apim_assess.collector.apim_core import collect
-from apim_assess.config import AssessmentConfig, load_config, load_rule_settings
-from apim_assess.models.findings import PortfolioAssessment, RuleSettings
+from apim_assess.config import AiEnrichment, AssessmentConfig, load_analysis_config, load_config
+from apim_assess.models.findings import Narrative, PortfolioAssessment, RuleSettings
 from apim_assess.models.snapshot import Profile, Snapshot
 from apim_assess.reporting.generator import render
 
 app = typer.Typer(
     no_args_is_help=True,
-    help="Read-only APIM assessment. Five-pillar catalog, adjacent signals and offline explorer.",
+    help="Read-only APIM assessment. WAF/AI gateway checks, offline explorer and roadmap.",
 )
 console = Console(highlight=False, markup=False)
 
@@ -71,9 +72,21 @@ def run_collect(config: AssessmentConfig, output: Path) -> Snapshot:
 
 
 def run_analyze(
-    snapshot: Snapshot, output: Path, settings: RuleSettings | None = None
+    snapshot: Snapshot,
+    output: Path,
+    settings: RuleSettings | None = None,
+    ai: AiEnrichment | None = None,
 ) -> PortfolioAssessment:
     assessment = analyze(snapshot, settings)
+    if ai is not None:
+        try:
+            assessment.narrative = asyncio.run(enrich(assessment, ai))
+        except NarrativeError as exc:
+            assessment.narrative = Narrative(status="unavailable", error_code=str(exc))
+            console.print(
+                f"Warning narrative/{exc}: AI enrichment failed; deterministic findings "
+                "are unchanged and saved. Requested enrichment did not complete."
+            )
     write_model(output, assessment)
     console.print(f"Saved {output}: {len(assessment.findings)} rule result(s).")
     return assessment
@@ -115,15 +128,22 @@ def analyze_command(
     snapshot: Annotated[Path, typer.Option("--snapshot")],
     output: Annotated[Path, typer.Option("--output")] = Path("output/findings.json"),
     config: Annotated[Path | None, typer.Option("--config")] = None,
+    enrich_ai: Annotated[bool, typer.Option("--enrich-ai")] = False,
 ) -> None:
-    """Analyze a saved snapshot offline, without Azure credentials."""
+    """Analyze offline; --enrich-ai explicitly opts into aggregate-only remote commentary."""
     with input_errors():
         distinct_paths(snapshot, output, config)
-        run_analyze(
+        settings = load_analysis_config(config)
+        if enrich_ai and settings.ai_enrichment is None:
+            raise ValueError("--enrich-ai requires configured ai_enrichment settings.")
+        assessment = run_analyze(
             Snapshot.model_validate_json(snapshot.read_text(encoding="utf-8")),
             output,
-            load_rule_settings(config),
+            settings.rules,
+            settings.ai_enrichment if enrich_ai else None,
         )
+        if assessment.narrative and assessment.narrative.status == "unavailable":
+            raise typer.Exit(2)
 
 
 @app.command("report")
@@ -152,6 +172,7 @@ def assess_command(
     metrics: Annotated[bool | None, typer.Option("--metrics/--no-metrics")] = None,
     lookback_days: Annotated[int | None, typer.Option("--lookback-days", min=1, max=30)] = None,
     output_dir: Annotated[Path, typer.Option("--output-dir")] = Path("output"),
+    enrich_ai: Annotated[bool, typer.Option("--enrich-ai")] = False,
 ) -> None:
     """Compose the same collect -> analyze -> report stages."""
     with input_errors():
@@ -168,6 +189,15 @@ def assess_command(
             metrics,
             lookback_days,
         )
+        if enrich_ai and settings.ai_enrichment is None:
+            raise ValueError("--enrich-ai requires configured ai_enrichment settings.")
         snapshot = run_collect(settings, snapshot_path)
-        assessment = run_analyze(snapshot, findings_path, settings.rules)
+        assessment = run_analyze(
+            snapshot,
+            findings_path,
+            settings.rules,
+            settings.ai_enrichment if enrich_ai else None,
+        )
         run_report(snapshot, assessment, report_path)
+        if assessment.narrative and assessment.narrative.status == "unavailable":
+            raise typer.Exit(2)

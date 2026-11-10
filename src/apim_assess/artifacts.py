@@ -5,12 +5,12 @@ import os
 import tempfile
 from pathlib import Path
 
-from apim_assess.models.policy import CATALOG_METADATA_FIELDS
+from apim_assess.models.policy import CATALOG_METADATA_FIELDS, MODERN_METADATA_FIELDS
 from apim_assess.models.snapshot import Model, Snapshot
 
 
 def digest(snapshot: Snapshot) -> str:
-    adjacent = {"networking", "governance", "log_analytics"}
+    adjacent = {"networking", "governance", "log_analytics", "upstream"}
     if snapshot.schema_version == "1.0":
         payload = snapshot.model_dump_json(
             exclude={"instances": {"__all__": {"inventory", "service_settings"} | adjacent}}
@@ -23,14 +23,31 @@ def digest(snapshot: Snapshot) -> str:
                         "service_settings": True,
                         **dict.fromkeys(adjacent, True),
                         "inventory": {
-                            "resources": {"__all__": {"metadata": CATALOG_METADATA_FIELDS}}
+                            "resources": {
+                                "__all__": {
+                                    "metadata": CATALOG_METADATA_FIELDS | MODERN_METADATA_FIELDS
+                                }
+                            }
                         },
                     }
                 },
             }
         )
-    elif snapshot.schema_version == "1.2":
-        payload = snapshot.model_dump_json(exclude={"instances": {"__all__": adjacent}})
+    elif snapshot.schema_version in {"1.2", "1.3"}:
+        payload = snapshot.model_dump_json(
+            exclude={
+                "instances": {
+                    "__all__": {
+                        **dict.fromkeys(
+                            adjacent if snapshot.schema_version == "1.2" else {"upstream"}, True
+                        ),
+                        "inventory": {
+                            "resources": {"__all__": {"metadata": MODERN_METADATA_FIELDS}}
+                        },
+                    }
+                }
+            }
+        )
     else:
         payload = snapshot.model_dump_json()
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()

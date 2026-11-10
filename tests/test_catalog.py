@@ -18,6 +18,7 @@ from apim_assess.collector.sanitizer import reference_id, sanitize_policy
 from apim_assess.models.findings import RuleSettings, Thresholds, Waiver
 from apim_assess.models.policy import (
     CATALOG_METADATA_FIELDS,
+    MODERN_METADATA_FIELDS,
     CollectionCoverage,
     Inventory,
     ResourceMetadata,
@@ -549,7 +550,7 @@ def test_invalid_rule_configuration_is_rejected(data):
 
 def test_unknown_and_deferred_overrides_are_not_silently_ignored(catalog_snapshot):
     with pytest.raises(ValueError, match="deferred rule"):
-        analyze(catalog_snapshot, RuleSettings(severity_overrides={"APIM-SEC-004": "Low"}))
+        analyze(catalog_snapshot, RuleSettings(severity_overrides={"APIM-SEC-002": "Low"}))
     with pytest.raises(ValueError, match="does not match"):
         analyze(
             catalog_snapshot,
@@ -641,7 +642,14 @@ def test_iteration_two_digest_and_findings_are_still_reportable(catalog_snapshot
                     "networking": True,
                     "governance": True,
                     "log_analytics": True,
-                    "inventory": {"resources": {"__all__": {"metadata": CATALOG_METADATA_FIELDS}}},
+                    "upstream": True,
+                    "inventory": {
+                        "resources": {
+                            "__all__": {
+                                "metadata": CATALOG_METADATA_FIELDS | MODERN_METADATA_FIELDS
+                            }
+                        }
+                    },
                 }
             },
         }

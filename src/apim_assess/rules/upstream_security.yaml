@@ -1,0 +1,36 @@
+- id: APIM-SEC-004
+  title: Matched public upstream route lacks blocking managed WAF protection
+  pillar: SEC
+  mcsb_controls: [NS-6]
+  severity: High
+  non_prod_severity: Medium
+  evaluator: upstream_waf
+  applicability: Public APIM ingress with an observed AFD Standard/Premium route/domain or Application Gateway basic/path route matching a gateway hostname or IP. Internal/explicitly public-disabled gateways are not applicable.
+  required_signals: [authorized upstream discovery or explicit probes, matching origin or pool, effective route/domain WAF association, WAF policy settings and managed rulesets]
+  description: Require an enabled Prevention policy with blocking managed rules on every observed matched route. AppGW path/listener policies override gateway defaults. Front Door associations must cover the route domain and all paths; unresolved associations and managed-rule exceptions remain unknown.
+  business_impact: Unprotected or detection-only ingress can let malicious web traffic reach gateway APIs.
+  remediation: Attach an enabled Prevention WAF with a supported blocking managed ruleset to every intended route/domain; review exclusions, path/listener overrides, HTTPS forwarding, probes and origin restrictions. Independently validate traffic paths.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/front-door-api-management
+    - https://learn.microsoft.com/en-us/azure/web-application-firewall/afds/waf-front-door-policy-settings
+    - https://learn.microsoft.com/en-us/azure/web-application-firewall/ag/ag-overview
+    - https://learn.microsoft.com/en-us/rest/api/frontdoor/azurefrontdoorstandardpremium/security-policies/list-by-profile
+    - https://learn.microsoft.com/en-us/security/benchmark/azure/baselines/api-management-security-baseline
+- id: APIM-SEC-005
+  title: Matched public upstream origin lacks verified source lockdown configuration
+  pillar: SEC
+  mcsb_controls: [NS-1, NS-6]
+  severity: Critical
+  non_prod_severity: High
+  evaluator: upstream_lockdown
+  applicability: Public APIM ingress with observed upstream routes. Inspects linked regional NSGs; AFD also requires a matching literal Front Door ID check. Internal or explicitly public-disabled gateways are not applicable to public bypass.
+  required_signals: [matched upstream route, linked APIM subnet NSGs across regions, AppGW subnet prefixes or AzureFrontDoor.Backend source, effective API inbound header checks]
+  description: Require source-specific TCP 443 allowance before broad inbound denials on both 80 and 443. AFD also requires an effective check-header bound to the exact observed Front Door UUID with a rejecting status code. Broad permits fail; conditional/dynamic or unsupported alternative controls stay unknown.
+  business_impact: Direct public origin requests may evade the intended upstream WAF inspection.
+  remediation: Restrict gateway ingress to the intended edge sources and deny other public web traffic; bind AFD headers to the intended profile. Validate ip-filter, mTLS, Private Link and other designs independently; a header alone is spoofable and configuration is not reachability proof.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/front-door-api-management
+    - https://learn.microsoft.com/en-us/azure/frontdoor/origin-security
+    - https://learn.microsoft.com/en-us/azure/api-management/check-header-policy
+    - https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-integrate-internal-vnet-appgateway
+    - https://learn.microsoft.com/en-us/security/benchmark/azure/baselines/api-management-security-baseline

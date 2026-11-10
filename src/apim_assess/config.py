@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
+from urllib.parse import urlsplit
 
 import yaml
-from pydantic import Field, TypeAdapter, model_validator
+from pydantic import Field, TypeAdapter, field_validator, model_validator
 
 from apim_assess.models.findings import RuleSettings
 from apim_assess.models.snapshot import (
@@ -27,11 +29,74 @@ class Targets(Model):
     resource_groups: list[ResourceGroup] = Field(default_factory=list)
 
 
+class UpstreamModule(Model):
+    enabled: bool = False
+    auto_discover: bool = True
+    resource_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def usable_scope(self) -> UpstreamModule:
+        if self.enabled and not self.auto_discover and not self.resource_ids:
+            raise ValueError("An enabled upstream module needs discovery or explicit IDs")
+        return self
+
+
 class Modules(Model):
     metrics: bool = True
     networking: bool = True
     defender_policy: bool = True
     log_analytics_kql: bool = False
+    afd: UpstreamModule = Field(default_factory=UpstreamModule)
+    appgw: UpstreamModule = Field(default_factory=UpstreamModule)
+
+    @model_validator(mode="after")
+    def valid_upstream_ids(self) -> Modules:
+        from apim_assess.collector.client import AzureReadError, linked_resource
+
+        for module, kind in (
+            (self.afd, r"Microsoft\.Cdn/profiles/[\w.-]+"),
+            (self.appgw, r"Microsoft\.Network/applicationGateways/[\w.-]+"),
+        ):
+            for identifier in module.resource_ids:
+                try:
+                    linked_resource(identifier, kind)
+                except AzureReadError as exc:
+                    raise ValueError("Invalid explicit upstream resource ID") from exc
+        return self
+
+
+class AiEnrichment(Model):
+    provider: Literal["azure_openai", "openai_compatible"] = "azure_openai"
+    endpoint: str
+    deployment: str = Field(min_length=1, max_length=128, pattern=r"^[\w.-]+$")
+    api_key_env: str = Field(default="APIM_ASSESS_AI_KEY", pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+    timeout_seconds: int = Field(default=30, ge=1, le=120)
+
+    @field_validator("endpoint")
+    @classmethod
+    def safe_endpoint(cls, value: str) -> str:
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("Narrative endpoint must be HTTPS without credentials/query/fragment")
+        return value.rstrip("/")
+
+    @model_validator(mode="after")
+    def azure_endpoint(self) -> AiEnrichment:
+        parsed = urlsplit(self.endpoint)
+        if self.provider == "azure_openai" and (
+            not (parsed.hostname or "").endswith(".openai.azure.com")
+            or parsed.path not in {"", "/"}
+            or parsed.port not in {None, 443}
+        ):
+            raise ValueError("Azure OpenAI requires its public-cloud resource base endpoint")
+        return self
 
 
 class Telemetry(Model):
@@ -46,6 +111,7 @@ class AssessmentConfig(Model):
     modules: Modules = Field(default_factory=Modules)
     telemetry: Telemetry = Field(default_factory=Telemetry)
     rules: RuleSettings = Field(default_factory=RuleSettings)
+    ai_enrichment: AiEnrichment | None = None
 
     @model_validator(mode="after")
     def consistent_targets(self) -> AssessmentConfig:
@@ -63,12 +129,16 @@ class AssessmentConfig(Model):
 
 
 def load_rule_settings(path: Path | None) -> RuleSettings:
+    return load_analysis_config(path).rules
+
+
+def load_analysis_config(path: Path | None) -> AssessmentConfig:
     if path is None:
-        return RuleSettings()
+        return AssessmentConfig()
     data = TypeAdapter(dict[str, object]).validate_python(
         yaml.safe_load(path.read_text(encoding="utf-8"))
     )
-    return AssessmentConfig.model_validate(data).rules
+    return AssessmentConfig.model_validate(data)
 
 
 def load_config(

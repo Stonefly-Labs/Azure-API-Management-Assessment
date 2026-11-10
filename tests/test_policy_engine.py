@@ -269,7 +269,7 @@ def test_product_controls_are_not_union_applied_to_api_subscription_context(poli
     assert len(assessment.policy_coverage) == 2
     assert {row.jwt for row in assessment.policy_coverage} == {"present", "absent"}
     assert outcomes(policy_snapshot)["APIM-SEC-018"] == "fail"
-    assert len(assessment.findings) == 47  # Contexts do not inflate scores.
+    assert len(assessment.findings) == 54  # Contexts do not inflate scores.
 
 
 def test_open_product_creates_anonymous_context_even_when_api_requires_key(policy_snapshot):
@@ -567,6 +567,7 @@ def test_legacy_digest_and_findings_still_render_without_reinterpreting_scores(s
                     "networking",
                     "governance",
                     "log_analytics",
+                    "upstream",
                 }
             }
         }

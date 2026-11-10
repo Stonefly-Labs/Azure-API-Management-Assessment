@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 from xml.etree import ElementTree as ET
 
 from defusedxml.common import DefusedXmlException
@@ -15,6 +15,7 @@ DYNAMIC = "__EXPRESSION__"
 REFERENCE = "__NAMED_VALUE__"
 LITERAL_URL = "__LITERAL_URL__"
 LITERAL_ORIGIN = "__LITERAL_ORIGIN__"
+COGNITIVE_AUDIENCE = "__COGNITIVE_AUDIENCE__"
 MAX_XML_BYTES = 512 * 1024
 SECTIONS = ("inbound", "backend", "outbound", "on-error")
 TAGS = {
@@ -90,6 +91,14 @@ TAGS = {
     "validate-headers",
     "json-to-xml",
     "xml-to-json",
+    "llm-token-limit",
+    "azure-openai-token-limit",
+    "llm-emit-token-metric",
+    "azure-openai-emit-token-metric",
+    "dimension",
+    "validate-graphql-request",
+    "authorize",
+    "rule",
 }
 BOOL_ATTRIBUTES = {
     "allow-credentials",
@@ -102,6 +111,8 @@ BOOL_ATTRIBUTES = {
     "require-signed-tokens",
     "require-expiration-time",
     "validate-connectivity",
+    "estimate-prompt-tokens",
+    "ignore-case",
 }
 NUMBER_ATTRIBUTES = {
     "calls",
@@ -115,11 +126,16 @@ NUMBER_ATTRIBUTES = {
     "timeout-ms",
     "max-size",
     "duration",
+    "tokens-per-minute",
+    "token-quota",
+    "max-depth",
+    "failed-check-httpcode",
 }
 ENUM_ATTRIBUTES = {
     "exists-action": {"delete", "override", "append", "skip"},
     "size-exceeded-action": {"prevent", "detect", "ignore"},
     "caching-type": {"internal", "external", "prefer-external"},
+    "token-quota-period": {"Hourly", "Daily", "Weekly", "Monthly", "Yearly"},
 }
 IMPLEMENTATION_HEADERS = {"x-powered-by", "x-aspnet-version", "server"}
 SECRET_PATTERN = re.compile(
@@ -145,6 +161,49 @@ def value_kind(value: object) -> str:
     return "literal"
 
 
+def ai_backend_kind(value: object) -> str:
+    if not isinstance(value, str) or not value:
+        return "unknown"
+    if value_kind(value) != "literal":
+        return "unknown"
+    try:
+        parsed = urlsplit(value)
+        hostname = (parsed.hostname or "").casefold()
+    except ValueError:
+        return "unknown"
+    if parsed.scheme not in {"https", "http"} or not hostname:
+        return "unknown"
+    if hostname.endswith(".openai.azure.com") or (
+        hostname.endswith((".cognitiveservices.azure.com", ".services.ai.azure.com"))
+        and "/openai" in parsed.path.casefold()
+    ):
+        return "azure_openai"
+    if hostname in {"api.openai.com", "api.anthropic.com", "generativelanguage.googleapis.com"} or (
+        hostname.endswith(".services.ai.azure.com")
+        or hostname == "aiplatform.googleapis.com"
+        or hostname.endswith(".aiplatform.googleapis.com")
+    ):
+        return "llm"
+    return "other"
+
+
+def url_api_key(value: object) -> bool | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = urlsplit(value)
+        keys = parse_qsl(parsed.query, keep_blank_values=True, max_num_fields=1000)
+    except ValueError:
+        return None
+    if (
+        parsed.username
+        or parsed.password
+        or any(key.casefold() in {"api-key", "x-api-key", "api_key", "key"} for key, _ in keys)
+    ):
+        return True
+    return False if value_kind(value) == "literal" and parsed.hostname else None
+
+
 def sanitize_policy(
     source: str, xml: str, *, fragment: bool = False, already_sanitized: bool = False
 ) -> PolicyDocument:
@@ -165,6 +224,17 @@ def sanitize_policy(
     if fragment and any(node.tag in {*SECTIONS, "base", "include-fragment"} for node in nodes):
         return unavailable("INVALID_FRAGMENT_STRUCTURE")
     secret_pattern = bool(SECRET_PATTERN.search(xml))
+    header_values: dict[int, str] = {}
+    for header in root.iter("check-header"):
+        if header.attrib.get("name", "").casefold() == "x-azure-fdid":
+            for child in header:
+                raw = (child.text or "").strip()
+                if child.tag != "value":
+                    continue
+                if re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", raw):
+                    header_values[id(child)] = reference_id(raw.casefold())
+                elif already_sanitized and re.fullmatch(r"ref_[a-f0-9]{64}", raw):
+                    header_values[id(child)] = raw
 
     def scrub(node: ET.Element, depth: int) -> bool:
         if depth > 64:
@@ -191,10 +261,24 @@ def sanitize_policy(
                 "increment-condition",
                 "condition",
                 "certificate-id",
+                "resource",
+                "client-id",
+                "output-token-variable-name",
+                "namespace",
+                "ai-backend-kind",
+                "ai-api-key",
             }:
                 continue
+            if key == "ai-backend-kind":
+                if already_sanitized and raw in {"azure_openai", "llm", "other", "unknown"}:
+                    attributes[key] = raw
+                continue
+            if key == "ai-api-key":
+                if already_sanitized and raw in {"true", "false", "unknown"}:
+                    attributes[key] = raw
+                continue
             if already_sanitized and (
-                raw in {DYNAMIC, REFERENCE, LITERAL_URL, REDACTED}
+                raw in {DYNAMIC, REFERENCE, LITERAL_URL, REDACTED, COGNITIVE_AUDIENCE}
                 or re.fullmatch(r"ref_[a-f0-9]{64}", raw)
             ):
                 safe = raw
@@ -205,25 +289,39 @@ def sanitize_policy(
             elif key in ENUM_ATTRIBUTES and raw in ENUM_ATTRIBUTES[key]:
                 safe = raw
             elif (
-                key == "name" and node.tag == "set-header" and raw.lower() in IMPLEMENTATION_HEADERS
+                key == "name"
+                and node.tag in {"set-header", "check-header"}
+                and raw.lower()
+                in IMPLEMENTATION_HEADERS
+                | {"authorization", "api-key", "x-api-key", "x-azure-fdid"}
             ):
                 safe = raw.lower()
+            elif key == "resource" and raw.rstrip("/") == "https://cognitiveservices.azure.com":
+                safe = COGNITIVE_AUDIENCE
             elif raw.startswith(("@(", "@{")):
                 safe = DYNAMIC
             elif "{{" in raw:
                 safe = REFERENCE
-            elif key in {"fragment-id", "backend-id"}:
+            elif key in {"fragment-id", "backend-id", "namespace"}:
                 safe = reference_id(raw)
             elif key in {"base-url", "url"} and raw.startswith(("http://", "https://")):
                 safe = LITERAL_URL
             else:
                 safe = REDACTED
             attributes[key] = safe
+            if key == "base-url" and not already_sanitized:
+                attributes["ai-backend-kind"] = ai_backend_kind(raw)
+                key_presence = url_api_key(raw)
+                attributes["ai-api-key"] = (
+                    "unknown" if key_presence is None else str(key_presence).lower()
+                )
         node.attrib.clear()
         node.attrib.update(attributes)
         if node.text and node.text.strip():
             raw_text = node.text.strip()
-            if node.tag == "origin":
+            if id(node) in header_values:
+                node.text = header_values[id(node)]
+            elif node.tag == "origin":
                 if raw_text == "*":
                     node.text = "*"
                 elif raw_text.startswith(("@(", "@{")):

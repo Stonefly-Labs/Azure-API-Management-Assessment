@@ -83,7 +83,7 @@ def _expand(
     return result
 
 
-def resolve(instance: Instance) -> list[EffectivePolicy]:
+def resolve(instance: Instance, *, include_graphql: bool = False) -> list[EffectivePolicy]:
     inventory = instance.inventory
     if inventory is None or instance.core_status != "available":
         return []
@@ -214,7 +214,8 @@ def resolve(instance: Instance) -> list[EffectivePolicy]:
                                     )
                                 )
                         view.sections[section] = merged
-                if api.metadata.api_type not in {"http", "soap"} and not view.http_gateway_only:
+                supported = {"http", "soap"} | ({"graphql"} if include_graphql else set())
+                if api.metadata.api_type not in supported and not view.http_gateway_only:
                     view.issues.append(
                         "Protocol metadata unavailable"
                         if api.metadata.api_type is None

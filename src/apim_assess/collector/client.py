@@ -58,6 +58,7 @@ class ArmReader:
         params: dict[str, str] | None,
         *,
         policy_xml: bool = False,
+        json_body: dict[str, object] | None = None,
     ) -> object:
         url = ARM + path if path.startswith("/") else path
         parsed = urlsplit(url)
@@ -65,7 +66,11 @@ class ArmReader:
             parsed.scheme != "https"
             or parsed.netloc.casefold() not in {"management.azure.com", "management.azure.com:443"}
             or parsed.fragment
-            or not parsed.path.startswith("/subscriptions/")
+            or not (
+                parsed.path.startswith("/subscriptions/")
+                or method == "POST"
+                and parsed.path == "/providers/Microsoft.ResourceGraph/resources"
+            )
         ):
             raise AzureReadError("UNSAFE_URL")
         try:
@@ -77,6 +82,7 @@ class ArmReader:
                     params=params,
                     headers={"Authorization": f"Bearer {token.token}"},
                     follow_redirects=False,
+                    json=json_body,
                 )
                 if response.status_code in {429, 500, 502, 503, 504} and attempt < 2:
                     retry = response.headers.get("Retry-After", "")
@@ -99,6 +105,57 @@ class ArmReader:
         except httpx.HTTPError as exc:
             raise AzureReadError("TRANSPORT_ERROR") from exc
         raise AzureReadError("RETRY_EXHAUSTED")
+
+    async def graph_resources(
+        self, subscriptions: list[str], resource_type: str
+    ) -> AsyncIterator[str]:
+        if resource_type not in {"microsoft.cdn/profiles", "microsoft.network/applicationgateways"}:
+            raise AzureReadError("INVALID_GRAPH_TYPE")
+        try:
+            scope = sorted({str(UUID(value)) for value in subscriptions})
+        except ValueError as exc:
+            raise AzureReadError("INVALID_GRAPH_SCOPE") from exc
+        if not scope:
+            raise AzureReadError("EMPTY_GRAPH_SCOPE")
+        query = f"Resources | where type =~ '{resource_type}'"
+        if resource_type == "microsoft.cdn/profiles":
+            query += " | where sku.name in~ ('Standard_AzureFrontDoor', 'Premium_AzureFrontDoor')"
+        query += " | project id | order by id asc"
+        skip: str | None = None
+        seen: set[str] = set()
+        while True:
+            options: dict[str, object] = {"resultFormat": "objectArray", "$top": 1000}
+            if skip:
+                options["$skipToken"] = skip
+            body = await self._read(
+                "POST",
+                "/providers/Microsoft.ResourceGraph/resources",
+                {"api-version": "2024-04-01"},
+                json_body={"subscriptions": scope, "query": query, "options": options},
+            )
+            if not isinstance(body, dict) or not isinstance(body.get("data"), list):
+                raise AzureReadError("INVALID_GRAPH_RESPONSE")
+            for item in body["data"]:
+                if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+                    raise AzureReadError("INVALID_GRAPH_RESPONSE")
+                identifier = item["id"]
+                parts = identifier.split("/")
+                if len(parts) != 9 or parts[2].casefold() not in scope:
+                    raise AzureReadError("OUT_OF_SCOPE_RESPONSE")
+                if "/".join(parts[6:8]).casefold() != resource_type:
+                    raise AzureReadError("OUT_OF_SCOPE_RESPONSE")
+                yield identifier
+            link = body.get("$skipToken")
+            if link is not None and not isinstance(link, str):
+                raise AzureReadError("INVALID_GRAPH_PAGINATION")
+            if not link:
+                if str(body.get("resultTruncated", "false")).casefold() == "true":
+                    raise AzureReadError("TRUNCATED_GRAPH_RESPONSE")
+                break
+            if link in seen:
+                raise AzureReadError("INVALID_GRAPH_PAGINATION")
+            seen.add(link)
+            skip = link
 
     async def policy_states(self, identifier: str) -> AsyncIterator[object]:
         from apim_assess.models.snapshot import resource_id
