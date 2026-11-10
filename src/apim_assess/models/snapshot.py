@@ -14,6 +14,8 @@ from pydantic import (
     model_validator,
 )
 
+from apim_assess.models.policy import Inventory
+
 Environment = Literal["prod", "non-prod"]
 Profile = Literal["auto", "prod", "non-prod"]
 SignalStatus = Literal["available", "unavailable", "unsupported"]
@@ -59,7 +61,7 @@ Percent = Annotated[float, Field(ge=0)]
 
 
 class CollectionWarning(Model):
-    module: Literal["discovery", "core", "metrics"]
+    module: Literal["discovery", "core", "metrics", "subresources", "policies"]
     resource_id: str
     code: str
     message: str
@@ -113,10 +115,11 @@ class Instance(Model):
     identity_type: str | None = None
     custom_properties: dict[str, bool] = Field(default_factory=dict)
     metrics: list[MetricSeries] = Field(default_factory=list)
+    inventory: Inventory | None = None
 
 
 class Snapshot(Model):
-    schema_version: Literal["1.0"] = "1.0"
+    schema_version: Literal["1.0", "1.1"] = "1.1"
     collected_at: AwareDatetime
     telemetry_start: AwareDatetime
     telemetry_end: AwareDatetime
@@ -131,6 +134,15 @@ class Snapshot(Model):
         if len(set(ids)) != len(ids):
             raise ValueError("Duplicate APIM resource IDs")
         for instance in self.instances:
+            if self.schema_version == "1.0" and instance.inventory is not None:
+                raise ValueError("Sub-resource inventory requires snapshot schema 1.1")
+            if instance.inventory is not None:
+                identifiers = [item.resource_id.casefold() for item in instance.inventory.resources]
+                if len(identifiers) != len(set(identifiers)):
+                    raise ValueError("Duplicate sub-resource IDs")
+                prefix = instance.resource_id.casefold() + "/"
+                if any(not identifier.startswith(prefix) for identifier in identifiers):
+                    raise ValueError("Sub-resource is outside the APIM instance")
             for series in instance.metrics:
                 timestamps = [point.timestamp for point in series.points]
                 if len(timestamps) != len(set(timestamps)):

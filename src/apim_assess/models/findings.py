@@ -1,7 +1,8 @@
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
+from apim_assess.models.policy import PolicyCoverage
 from apim_assess.models.snapshot import Environment, Model, ResourceId
 
 Pillar = Literal["REL", "SEC", "COST", "OPS", "PERF"]
@@ -56,7 +57,14 @@ class PillarScore(Model):
 
 
 class PortfolioAssessment(Model):
-    schema_version: Literal["1.0"] = "1.0"
+    schema_version: Literal["1.0", "1.1"] = "1.1"
     snapshot_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
     findings: list[Finding]
     pillar_scores: list[PillarScore]
+    policy_coverage: list[PolicyCoverage] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def consistent_version(self) -> "PortfolioAssessment":
+        if self.schema_version == "1.0" and self.policy_coverage:
+            raise ValueError("Policy coverage requires findings schema 1.1")
+        return self

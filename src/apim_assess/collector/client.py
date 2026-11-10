@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
 from urllib.parse import urlsplit
 
 import httpx
+from azure.core.credentials import AccessToken
 from azure.core.credentials_async import AsyncTokenCredential
 from azure.core.exceptions import ClientAuthenticationError
 
@@ -19,19 +21,29 @@ class ArmReader:
     def __init__(self, credential: AsyncTokenCredential, client: httpx.AsyncClient) -> None:
         self.credential = credential
         self.client = client
+        self._token: AccessToken | None = None
+        self._token_lock = asyncio.Lock()
 
-    async def get(self, path: str, params: dict[str, str] | None = None) -> object:
+    async def _access_token(self) -> AccessToken:
+        async with self._token_lock:
+            if self._token is None or self._token.expires_on <= time.time() + 120:
+                self._token = await self.credential.get_token(ARM + "/.default")
+            return self._token
+
+    async def get(
+        self, path: str, params: dict[str, str] | None = None, *, policy_xml: bool = False
+    ) -> object:
         url = ARM + path if path.startswith("/") else path
         parsed = urlsplit(url)
         if (
             parsed.scheme != "https"
-            or parsed.netloc != "management.azure.com"
+            or parsed.netloc.casefold() not in {"management.azure.com", "management.azure.com:443"}
             or parsed.fragment
             or not parsed.path.startswith("/subscriptions/")
         ):
             raise AzureReadError("UNSAFE_URL")
         try:
-            token = await self.credential.get_token(ARM + "/.default")
+            token = await self._access_token()
             for attempt in range(3):
                 response = await self.client.get(
                     url,
@@ -45,6 +57,11 @@ class ArmReader:
                     continue
                 if response.status_code != 200:
                     raise AzureReadError(f"HTTP_{response.status_code}")
+                media = response.headers.get("content-type", "").split(";", 1)[0].lower()
+                if policy_xml and (
+                    media in {"text/xml", "application/xml"} or media.endswith("+xml")
+                ):
+                    return response.text
                 try:
                     result: object = response.json()
                     return result

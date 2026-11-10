@@ -6,8 +6,10 @@ from pydantic import TypeAdapter
 
 from apim_assess.analyzer.evaluators.cost import low_capacity
 from apim_assess.analyzer.evaluators.performance import saturation
+from apim_assess.analyzer.evaluators.policy import BINDINGS, coverage, evaluate
 from apim_assess.analyzer.evaluators.reliability import developer_sku, zone_redundancy
 from apim_assess.analyzer.evaluators.security import network_posture
+from apim_assess.analyzer.policy_resolver import resolve
 from apim_assess.artifacts import digest
 from apim_assess.models.findings import (
     PILLARS,
@@ -17,6 +19,7 @@ from apim_assess.models.findings import (
     PortfolioAssessment,
     Rule,
 )
+from apim_assess.models.policy import PolicyCoverage
 from apim_assess.models.snapshot import Instance, Snapshot
 
 EVALUATORS: dict[str, Callable[[Instance, Snapshot], Evaluation]] = {
@@ -30,13 +33,18 @@ WEIGHTS = {"Critical": 5, "High": 4, "Medium": 3, "Low": 2, "Advisory": 1}
 
 
 def load_rules() -> list[Rule]:
-    path = files("apim_assess").joinpath("rules", "seed.yaml")
-    rules = TypeAdapter(list[Rule]).validate_python(
-        yaml.safe_load(path.read_text(encoding="utf-8"))
-    )
+    rules = []
+    directory = files("apim_assess").joinpath("rules")
+    for path in sorted(directory.iterdir(), key=lambda item: item.name):
+        if path.name.endswith(".yaml"):
+            rules.extend(
+                TypeAdapter(list[Rule]).validate_python(
+                    yaml.safe_load(path.read_text(encoding="utf-8"))
+                )
+            )
     if len({rule.id for rule in rules}) != len(rules):
         raise ValueError("Duplicate rule IDs in the catalog")
-    if any(rule.evaluator not in EVALUATORS for rule in rules):
+    if any(rule.evaluator not in EVALUATORS and rule.evaluator not in BINDINGS for rule in rules):
         raise ValueError("Unknown rule evaluator binding")
     return rules
 
@@ -68,11 +76,19 @@ def scores(findings: list[Finding]) -> list[PillarScore]:
 
 def analyze(snapshot: Snapshot) -> PortfolioAssessment:
     findings: list[Finding] = []
+    policy_coverage: list[PolicyCoverage] = []
     rules = load_rules()
     for instance in snapshot.instances:
+        views = resolve(instance)
+        rows = [coverage(instance, view) for view in views]
+        policy_coverage.extend(rows)
         for rule in rules:
             result = (
-                EVALUATORS[rule.evaluator](instance, snapshot)
+                (
+                    evaluate(rule.evaluator, instance, views, rows)
+                    if rule.evaluator in BINDINGS
+                    else EVALUATORS[rule.evaluator](instance, snapshot)
+                )
                 if instance.core_status == "available"
                 else Evaluation(outcome="unknown", summary="Core collection is unavailable.")
             )
@@ -88,5 +104,8 @@ def analyze(snapshot: Snapshot) -> PortfolioAssessment:
                 )
             )
     return PortfolioAssessment(
-        snapshot_digest=digest(snapshot), findings=findings, pillar_scores=scores(findings)
+        snapshot_digest=digest(snapshot),
+        findings=findings,
+        pillar_scores=scores(findings),
+        policy_coverage=policy_coverage,
     )

@@ -9,7 +9,12 @@ from apim_assess.models.snapshot import Model, Snapshot
 
 
 def digest(snapshot: Snapshot) -> str:
-    return hashlib.sha256(snapshot.model_dump_json().encode("utf-8")).hexdigest()
+    payload = (
+        snapshot.model_dump_json(exclude={"instances": {"__all__": {"inventory"}}})
+        if snapshot.schema_version == "1.0"
+        else snapshot.model_dump_json()
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def write_text(path: Path, text: str) -> None:

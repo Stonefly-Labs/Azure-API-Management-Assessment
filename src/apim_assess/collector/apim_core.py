@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from apim_assess.collector.client import ArmReader, AzureReadError
 from apim_assess.collector.discovery import APIM_API_VERSION, discover
+from apim_assess.collector.subresources import SubresourceCollector
 from apim_assess.collector.telemetry import collect_metrics
 from apim_assess.config import AssessmentConfig
 from apim_assess.models.snapshot import (
@@ -222,6 +223,10 @@ async def _collect(config: AssessmentConfig, reader: ArmReader) -> Snapshot:
             instance.metrics = await collect_metrics(
                 reader, instance, start, end, warnings, enabled=config.modules.metrics
             )
+            if service is not None:
+                instance.inventory = await SubresourceCollector(
+                    reader, identifier, warnings
+                ).collect()
             return instance
 
     instances = await asyncio.gather(*(one(identifier) for identifier in identifiers))
