@@ -4,6 +4,17 @@ from typing import Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
+CATALOG_METADATA_FIELDS = {
+    "subscription_scope",
+    "version_set",
+    "api_route_hash",
+    "pool_member_count",
+    "always_log_errors",
+    "body_bytes",
+    "application_insights",
+    "logger_reference_hash",
+}
+
 
 class PolicyModel(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
@@ -41,6 +52,14 @@ class ResourceMetadata(PolicyModel):
     validate_certificate_name: bool | None = None
     certificate_expiry: AwareDatetime | None = None
     sampling_percentage: float | None = Field(default=None, ge=0, le=100)
+    subscription_scope: Literal["all_apis", "api", "product", "unknown"] | None = None
+    version_set: bool | None = None
+    api_route_hash: str | None = Field(default=None, pattern=r"^ref_[a-f0-9]{64}$")
+    pool_member_count: int | None = Field(default=None, ge=0)
+    always_log_errors: bool | None = None
+    body_bytes: int | None = Field(default=None, ge=0)
+    application_insights: bool | None = None
+    logger_reference_hash: str | None = Field(default=None, pattern=r"^ref_[a-f0-9]{64}$")
     state: (
         Literal[
             "active",
@@ -71,6 +90,7 @@ class SubResource(PolicyModel):
         "diagnostic",
         "gateway",
         "workspace",
+        "logger",
     ]
     workspace: str | None = None
     metadata: ResourceMetadata = Field(default_factory=ResourceMetadata)

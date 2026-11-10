@@ -2,7 +2,7 @@ from datetime import timedelta
 
 import pytest
 
-from apim_assess.analyzer.engine import analyze, load_rules
+from apim_assess.analyzer.engine import ITERATION_2_IDS, SEED_IDS, analyze, load_rules, scores
 from apim_assess.models.findings import Finding
 from apim_assess.models.snapshot import MetricPoint, MetricSeries, Region, Sku, Snapshot
 
@@ -13,20 +13,24 @@ def finding(snapshot: Snapshot, rule_id: str) -> Finding:
 
 def test_seed_catalog_and_multi_instance_dispatch(snapshot: Snapshot) -> None:
     assessment = analyze(snapshot)
-    assert {rule.id for rule in load_rules()} == {
-        "APIM-REL-001",
-        "APIM-REL-002",
-        "APIM-SEC-001",
-        "APIM-COST-001",
-        "APIM-PERF-001",
-        "APIM-SEC-017",
-        "APIM-SEC-018",
-        "APIM-SEC-019",
-        "APIM-SEC-020",
-        "APIM-COST-004",
-        "APIM-OPS-002",
+    ids = {rule.id for rule in load_rules()}
+    assert ITERATION_2_IDS <= ids
+    assert len(ids) == 40
+    assert not ids & {
+        "APIM-REL-004",
+        "APIM-REL-005",
+        "APIM-SEC-002",
+        "APIM-SEC-003",
+        "APIM-SEC-004",
+        "APIM-SEC-005",
+        "APIM-SEC-025",
+        "APIM-COST-003",
+        "APIM-OPS-001",
+        "APIM-OPS-005",
+        "APIM-OPS-006",
+        "APIM-PERF-005",
     }
-    assert len(assessment.findings) == 33
+    assert len(assessment.findings) == 120
     assert {item.resource_id for item in assessment.findings} == {
         instance.resource_id for instance in snapshot.instances
     }
@@ -189,7 +193,11 @@ def test_scores_exclude_unknown_and_do_not_average_instance_scores(full_snapshot
     second.metrics = []
     full_snapshot.instances.append(second)
     assessment = analyze(full_snapshot)
-    reliability = next(score for score in assessment.pillar_scores if score.pillar == "REL")
+    reliability = next(
+        score
+        for score in scores([item for item in assessment.findings if item.rule.id in SEED_IDS])
+        if score.pillar == "REL"
+    )
     assert reliability.passed == 2
     assert reliability.failed == 1
     assert reliability.unsupported == 1

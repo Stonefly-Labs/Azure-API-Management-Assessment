@@ -5,6 +5,7 @@ from pathlib import Path
 import yaml
 from pydantic import Field, TypeAdapter, model_validator
 
+from apim_assess.models.findings import RuleSettings
 from apim_assess.models.snapshot import (
     Environment,
     Model,
@@ -39,6 +40,7 @@ class AssessmentConfig(Model):
     env: Profile = "auto"
     modules: Modules = Field(default_factory=Modules)
     telemetry: Telemetry = Field(default_factory=Telemetry)
+    rules: RuleSettings = Field(default_factory=RuleSettings)
 
     @model_validator(mode="after")
     def consistent_targets(self) -> AssessmentConfig:
@@ -51,6 +53,15 @@ class AssessmentConfig(Model):
         if self.targets.resource_groups and not self.targets.subscriptions:
             raise ValueError("Resource group discovery requires explicit subscriptions")
         return self
+
+
+def load_rule_settings(path: Path | None) -> RuleSettings:
+    if path is None:
+        return RuleSettings()
+    data = TypeAdapter(dict[str, object]).validate_python(
+        yaml.safe_load(path.read_text(encoding="utf-8"))
+    )
+    return AssessmentConfig.model_validate(data).rules
 
 
 def load_config(

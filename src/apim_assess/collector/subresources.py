@@ -16,7 +16,7 @@ from apim_assess.models.policy import (
     ResourceMetadata,
     SubResource,
 )
-from apim_assess.models.snapshot import CollectionWarning
+from apim_assess.models.snapshot import CollectionWarning, ServiceSettings
 
 VERSION = "2024-05-01"
 Kind = Literal[
@@ -30,6 +30,7 @@ Kind = Literal[
     "diagnostic",
     "gateway",
     "workspace",
+    "logger",
 ]
 COLLECTIONS: dict[str, Kind] = {
     "apis": "api",
@@ -39,6 +40,7 @@ COLLECTIONS: dict[str, Kind] = {
     "namedValues": "named_value",
     "certificates": "certificate",
     "diagnostics": "diagnostic",
+    "loggers": "logger",
 }
 
 
@@ -46,6 +48,16 @@ class _Entity(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
     properties: dict[str, object] = Field(default_factory=dict)
+
+
+class _PoolService(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(
+        pattern=(
+            r"(?i)^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/"
+            r"Microsoft\.ApiManagement/service/[^/]+/(?:workspaces/[^/]+/)?backends/[^/]+$"
+        )
+    )
 
 
 def _object(value: object) -> dict[str, object]:
@@ -58,12 +70,15 @@ def _metadata(kind: Kind, props: dict[str, object]) -> ResourceMetadata:
     projected: dict[str, object] = {}
     if kind == "api":
         authentication = _object(props.get("authenticationSettings"))
+        route = props.get("path")
         projected = {
             "subscription_required": props.get("subscriptionRequired"),
             "service_url_kind": value_kind(props.get("serviceUrl")),
             "api_type": props.get("type", props.get("apiType")),
             "protocols": props.get("protocols"),
             "oauth_configured": bool(authentication.get("oAuth2") or authentication.get("openid")),
+            "version_set": bool(props.get("apiVersionSetId")),
+            "api_route_hash": (reference_id(route) if isinstance(route, str) else None),
         }
     elif kind == "operation":
         projected = {"method": props.get("method")}
@@ -74,22 +89,82 @@ def _metadata(kind: Kind, props: dict[str, object]) -> ResourceMetadata:
         }
     elif kind == "backend":
         tls = _object(props.get("tls"))
+        pool = _object(props.get("pool"))
+        members = (
+            TypeAdapter(list[_PoolService]).validate_python(pool["services"])
+            if "services" in pool
+            else None
+        )
         projected = {
             "service_url_kind": value_kind(props.get("url")),
             "credentials_present": bool(props.get("credentials")),
-            "circuit_breaker_present": bool(props.get("circuitBreaker")),
+            "circuit_breaker_present": bool(_object(props.get("circuitBreaker")).get("rules")),
             "backend_pool": str(props.get("type", "")).lower() == "pool",
+            "pool_member_count": (
+                len({member.id.casefold() for member in members}) if members is not None else None
+            ),
             "validate_certificate_chain": tls.get("validateCertificateChain"),
             "validate_certificate_name": tls.get("validateCertificateName"),
         }
     elif kind == "certificate":
-        projected = {"certificate_expiry": props.get("expirationDate")}
+        projected = {
+            "certificate_expiry": props.get("expirationDate"),
+            "key_vault": props.get("keyVault") is not None,
+        }
     elif kind == "diagnostic":
-        projected = {"sampling_percentage": _object(props.get("sampling")).get("percentage")}
+        sizes = [
+            _object(_object(_object(props.get(side)).get(direction)).get("body")).get("bytes")
+            for side in ("frontend", "backend")
+            for direction in ("request", "response")
+        ]
+        body_sizes = TypeAdapter(list[int]).validate_python(
+            [size for size in sizes if size is not None]
+        )
+        logger = props.get("loggerId")
+        projected = {
+            "sampling_percentage": _object(props.get("sampling")).get("percentage"),
+            "always_log_errors": props.get("alwaysLog") == "allErrors",
+            "body_bytes": max(body_sizes) if body_sizes else None,
+            "logger_reference_hash": reference_id(logger.rsplit("/", 1)[-1])
+            if isinstance(logger, str)
+            else None,
+        }
+    elif kind == "logger":
+        logger_type = props.get("loggerType")
+        projected = {
+            "application_insights": (
+                logger_type == "applicationInsights"
+                if isinstance(logger_type, str)
+                and logger_type in {"applicationInsights", "azureEventHub", "azureMonitor"}
+                else None
+            ),
+        }
     elif kind in {"product", "subscription"}:
         projected = {"state": props.get("state")}
         if kind == "product":
             projected["subscription_required"] = props.get("subscriptionRequired")
+        else:
+            scope = props.get("scope")
+            relative = (
+                re.sub(
+                    r"^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/"
+                    r"Microsoft\.ApiManagement/service/[^/]+(?:/workspaces/[^/]+)?",
+                    "",
+                    scope,
+                    flags=re.I,
+                )
+                if isinstance(scope, str)
+                else ""
+            )
+            projected["subscription_scope"] = (
+                "all_apis"
+                if relative.casefold() == "/apis"
+                else "api"
+                if re.fullmatch(r"/apis/[^/]+", relative, re.I)
+                else "product"
+                if re.fullmatch(r"/products/[^/]+", relative, re.I)
+                else "unknown"
+            )
     return ResourceMetadata.model_validate(projected)
 
 
@@ -117,6 +192,46 @@ class SubresourceCollector:
 
     def url(self, path: str) -> str:
         return quote(self.identifier + ("/" + path if path else ""), safe="/")
+
+    async def setting(self, path: str, *keys: str) -> bool | None:
+        try:
+            async with self.semaphore:
+                body = _object(await self.reader.get(self.url(path), {"api-version": VERSION}))
+            props = _object(body.get("properties"))
+            value: object = props
+            for key in keys:
+                value = _object(value).get(key)
+            if not isinstance(value, bool):
+                raise AzureReadError("INCOMPLETE_METADATA")
+            self.inventory.collections[path] = CollectionCoverage(status="complete", count=1)
+            return value
+        except (AzureReadError, ValidationError) as exc:
+            self.inventory.collections[path] = CollectionCoverage(status="unavailable")
+            self.warn(path, str(exc) if isinstance(exc, AzureReadError) else "INVALID_RESPONSE")
+            return None
+
+    async def settings(self, settings: ServiceSettings, *, classic: bool, portal: bool) -> None:
+        if classic:
+            settings.management_api_enabled = await self.setting("tenant/access", "enabled")
+        if portal and settings.portal_enabled is not False:
+            settings.portal_signin_required = await self.setting(
+                "portalconfigs/default", "signin", "require"
+            )
+            settings.portal_signup_enabled = await self.setting("portalsettings/signup", "enabled")
+            providers = await self.listing("identityProviders")
+            if self.inventory.collections["identityProviders"].status == "complete":
+                types = [entity.properties.get("type") for entity in providers]
+                if all(
+                    isinstance(value, str)
+                    and value in {"aad", "aadB2C", "facebook", "google", "microsoft", "twitter"}
+                    for value in types
+                ):
+                    settings.portal_entra_enabled = any(
+                        value in ("aad", "aadB2C") for value in types
+                    )
+                else:
+                    self.inventory.collections["identityProviders"].status = "partial"
+                    self.warn("identityProviders", "INCOMPLETE_METADATA")
 
     async def listing(self, path: str) -> list[_Entity]:
         result: list[_Entity] = []

@@ -38,6 +38,7 @@ OPAQUE = {
     "send-one-way-request",
     "ip-filter",
     "check-header",
+    "cache-lookup",
 }
 
 
@@ -79,7 +80,7 @@ def _validator(node: PolicyNode, *, certificate: bool = False) -> bool | None:
     return True if source and signed and expiry and keys else None
 
 
-def _guaranteed(
+def guaranteed(
     nodes: list[PolicyNode], predicate: Callable[[PolicyNode], bool | None]
 ) -> ControlState:
     def run(
@@ -108,7 +109,7 @@ def _guaranteed(
                 else:
                     found = predicate(node)
                     if state != "present":
-                        if node.tag in OPAQUE or found is None:
+                        if node.tag in OPAQUE and found is not True or found is None:
                             state = "unknown"
                         elif found and state != "unknown":
                             state = "present"
@@ -125,14 +126,14 @@ def _guaranteed(
 
 
 def _identity(view: EffectivePolicy, *, certificate: bool = False) -> ControlState:
-    return _guaranteed(
+    return guaranteed(
         view.sections["inbound"],
         lambda node: _validator(node, certificate=certificate),
     )
 
 
 def _jwt(view: EffectivePolicy) -> ControlState:
-    return _guaranteed(
+    return guaranteed(
         view.sections["inbound"],
         lambda node: False if node.tag == "validate-client-certificate" else _validator(node),
     )
@@ -171,7 +172,7 @@ def _rate(instance: Instance, view: EffectivePolicy) -> ControlState:
             return None
         return True
 
-    return _guaranteed(view.sections["inbound"] + view.sections["backend"], predicate)
+    return guaranteed(view.sections["inbound"] + view.sections["backend"], predicate)
 
 
 def _cors(view: EffectivePolicy) -> ControlState:
@@ -228,21 +229,12 @@ def _cors(view: EffectivePolicy) -> ControlState:
     return outcomes.pop() if len(outcomes) == 1 else "unknown"
 
 
-def _backend(instance: Instance, view: EffectivePolicy) -> ControlState:
-    inventory = instance.inventory
-    if inventory is None:
-        return "unknown"
-    backends = {
-        (item.workspace, reference_id(item.name))
-        for item in inventory.resources
-        if item.kind == "backend"
-    }
-
+def backend_routes(view: EffectivePolicy) -> set[tuple[str | None, str]]:
     def run(
-        nodes: list[PolicyNode], paths: list[tuple[ControlState, bool]]
-    ) -> list[tuple[ControlState, bool]]:
+        nodes: list[PolicyNode], paths: list[tuple[tuple[str | None, str], bool]]
+    ) -> list[tuple[tuple[str | None, str], bool]]:
         for node in nodes:
-            updated: list[tuple[ControlState, bool]] = []
+            updated: list[tuple[tuple[str | None, str], bool]] = []
             for state, stopped in paths:
                 if stopped:
                     updated.append((state, True))
@@ -254,12 +246,10 @@ def _backend(instance: Instance, view: EffectivePolicy) -> ControlState:
                         if node.scope.startswith("workspaces/")
                         else None
                     )
-                    if reference and (workspace, reference) in backends:
-                        state = "present"
-                    elif url == LITERAL_URL:
-                        state = "absent"
-                    else:
-                        state = "unknown"
+                    state = (
+                        workspace,
+                        reference or (LITERAL_URL if url == LITERAL_URL else DYNAMIC),
+                    )
                     updated.append((state, False))
                 elif node.tag == "choose":
                     branches = [
@@ -272,19 +262,39 @@ def _backend(instance: Instance, view: EffectivePolicy) -> ControlState:
                 elif node.tag == "limit-concurrency":
                     updated.extend(run(node.children, [(state, False)]))
                 elif node.tag in OPAQUE:
-                    updated.extend([("unknown", True), (state, False)])
+                    updated.extend([((None, DYNAMIC), True), (state, False)])
                 else:
                     updated.append((state, node.tag in {"forward-request", "return-response"}))
             paths = list(dict.fromkeys(updated))
+            if len(paths) > 128:
+                return [((None, DYNAMIC), True)]
         return paths
 
-    initial: ControlState = "absent" if view.service_url_kind == "literal" else "unknown"
-    outcomes = {
+    initial = (None, LITERAL_URL if view.service_url_kind == "literal" else DYNAMIC)
+    return {
         state
         for state, _ in run(view.sections["inbound"] + view.sections["backend"], [(initial, False)])
     }
-    state = outcomes.pop() if len(outcomes) == 1 else "unknown"
-    return state
+
+
+def _backend(instance: Instance, view: EffectivePolicy) -> ControlState:
+    inventory = instance.inventory
+    if inventory is None:
+        return "unknown"
+    backends = {
+        (item.workspace, reference_id(item.name))
+        for item in inventory.resources
+        if item.kind == "backend"
+    }
+    outcomes: set[ControlState] = {
+        "absent"
+        if reference == LITERAL_URL
+        else "present"
+        if (workspace, reference) in backends
+        else "unknown"
+        for workspace, reference in backend_routes(view)
+    }
+    return outcomes.pop() if len(outcomes) == 1 else "unknown"
 
 
 def coverage(instance: Instance, view: EffectivePolicy) -> PolicyCoverage:
@@ -346,7 +356,7 @@ def evaluate(
         )
         if check == "inheritance" and view.missing_base:
             detail += "; missing base: " + ", ".join(view.missing_base)
-        evidence.append(Evidence(source="effective_policy", detail=detail))
+        evidence.append(Evidence(source="effective_policy", detail=detail, api_path=view.api_path))
     complete = inventory_complete(instance.inventory)
     outcome: Outcome
     if "absent" in states:

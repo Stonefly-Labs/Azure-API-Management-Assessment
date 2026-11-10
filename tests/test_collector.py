@@ -64,6 +64,10 @@ def exercise(handler, config):
         path = request.url.path
         tail = path.partition("/service/")[2]
         if tail and "/" in tail and not path.endswith("/metrics"):
+            if path.endswith(("/tenant/access", "/portalsettings/signup")):
+                return httpx.Response(200, json={"properties": {"enabled": False}})
+            if path.endswith("/portalconfigs/default"):
+                return httpx.Response(200, json={"properties": {"signin": {"require": True}}})
             if path.endswith("/policies/policy"):
                 return httpx.Response(404)
             return httpx.Response(200, json={"value": []})

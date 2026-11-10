@@ -1,0 +1,214 @@
+- id: APIM-SEC-006
+  title: Explicit legacy TLS or SSL protocol flag is enabled
+  pillar: SEC
+  mcsb_controls: [DP-3]
+  severity: Critical
+  non_prod_severity: High
+  evaluator: weak_tls
+  applicability: Explicit client/backend customProperties flags only; workspace/self-hosted negotiation and runtime traffic are not assessed.
+  required_signals: [customProperties legacy protocol flags]
+  description: Fail an explicit legacy enablement flag; missing flags are unknown. Retirement notices do not prove the observed service negotiated a protocol.
+  business_impact: Legacy TLS dependencies can weaken transport security and cause retirement-related connection failures.
+  remediation: Transition clients and backends to TLS 1.2 or later; review supported configuration and independently verify negotiated protocols.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-manage-protocols-ciphers
+    - https://learn.microsoft.com/en-us/azure/api-management/breaking-changes/tls-versions-retirement-oct-2025
+- id: APIM-SEC-007
+  title: Explicit configurable 3DES or CBC cipher flag is enabled
+  pillar: SEC
+  mcsb_controls: [DP-3]
+  severity: High
+  non_prod_severity: High
+  evaluator: weak_ciphers
+  applicability: Classic managed tiers only; Consumption/v2/workspace custom cipher configuration is unsupported.
+  required_signals: [sku, customProperties cipher flags]
+  description: Review the allowlisted configurable 3DES/CBC flags. Missing flags have no assumed default, and this is not a full negotiated cipher audit.
+  business_impact: Legacy cipher dependencies can conflict with the workload cryptographic baseline.
+  remediation: Select the narrowest supported modern cipher set after client compatibility testing; do not require impossible customization on constrained gateways.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-manage-protocols-ciphers
+- id: APIM-SEC-008
+  title: API transport configuration permits HTTP or WS
+  pillar: SEC
+  mcsb_controls: [DP-3]
+  severity: Critical
+  non_prod_severity: High
+  evaluator: api_protocols
+  applicability: API protocols metadata across service and workspace namespaces.
+  required_signals: [apis.protocols]
+  description: Explicit HTTP or WS permits an unencrypted transport; only explicit HTTPS/WSS-only lists satisfy the check.
+  business_impact: Requests or credentials can be exposed on an unencrypted hop.
+  remediation: Require HTTPS or WSS and verify clients and any upstream proxies independently.
+  references:
+    - https://learn.microsoft.com/en-us/azure/well-architected/service-guides/azure-api-management
+    - https://learn.microsoft.com/en-us/rest/api/apimanagement/api/list-by-service?view=rest-apimanagement-2024-05-01
+- id: APIM-SEC-009
+  title: Retired direct management API configuration is enabled
+  pillar: SEC
+  mcsb_controls: [PA-1]
+  severity: High
+  non_prod_severity: High
+  evaluator: direct_management
+  applicability: Classic tiers; retired configuration flag, not proof of endpoint reachability.
+  required_signals: [tenant/access.enabled, sku]
+  description: Use the secret-free Tenant Access GET operation; never request access keys.
+  business_impact: A retained retired management configuration increases operational and control-plane risk.
+  remediation: Disable direct management API access and migrate management tooling to Azure Resource Manager.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/breaking-changes/direct-management-api-retirement-march-2025
+    - https://learn.microsoft.com/en-us/rest/api/apimanagement/tenant-access/get?view=rest-apimanagement-2024-05-01
+- id: APIM-SEC-010
+  title: Configured minimum management API version is below the security floor
+  pillar: SEC
+  mcsb_controls: [IM-8, PA-7]
+  severity: High
+  non_prod_severity: High
+  evaluator: minimum_api_version
+  applicability: An explicitly collected apiVersionConstraint; omitted constraint is unknown, not a confirmed old version.
+  required_signals: [apiVersionConstraint.minApiVersion]
+  description: Compare the configured minimum to 2019-12-01; this historical security floor is not the recommended current API version.
+  business_impact: Legacy control-plane versions can expose sensitive metadata to broader roles.
+  remediation: Require at least the documented security floor and migrate automation to a current supported API version after compatibility review.
+  references:
+    - https://learn.microsoft.com/en-us/security/benchmark/azure/baselines/api-management-security-baseline
+    - https://learn.microsoft.com/en-us/rest/api/apimanagement/api-management-service/get?view=rest-apimanagement-2024-05-01
+- id: APIM-SEC-011
+  title: Service managed identity is explicitly disabled
+  pillar: SEC
+  mcsb_controls: [IM-3]
+  severity: High
+  non_prod_severity: Medium
+  evaluator: managed_identity
+  applicability: Service identity configuration only; workspace and backend permissions are separate.
+  required_signals: [identity.type]
+  description: System-assigned or user-assigned identity satisfies this configuration check. Omitted identity evidence remains unknown.
+  business_impact: Dependencies may require manually managed credentials instead of scoped workload identity.
+  remediation: Enable the appropriate managed identity and separately grant least-privilege permissions to required dependencies.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-use-managed-service-identity
+- id: APIM-SEC-012
+  title: Secret named value lacks supported Key Vault linkage
+  pillar: SEC
+  mcsb_controls: [IM-8, DP-6]
+  severity: High
+  non_prod_severity: Medium
+  evaluator: named_value_secrets
+  applicability: Secret=true metadata; workspace Key Vault linkage constraints are unsupported rather than impossible failures.
+  required_signals: [namedValues.secret, namedValues.keyVault]
+  description: Check metadata linkage only; neither named-value contents nor Key Vault secret versions are retrieved.
+  business_impact: Locally managed secrets can complicate rotation, ownership and access auditing.
+  remediation: Where supported, migrate secret named values to Key Vault with managed identity and tested rotation; document alternatives for constrained workspaces.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-properties
+    - https://learn.microsoft.com/en-us/azure/well-architected/service-guides/azure-api-management
+- id: APIM-SEC-013
+  title: Non-secret named value introduces a Key Vault dependency
+  pillar: SEC
+  severity: Low
+  non_prod_severity: Low
+  evaluator: nonsecret_key_vault
+  applicability: Explicit secret=false named-value metadata; contents are never inspected to guess sensitivity.
+  required_signals: [namedValues.secret, namedValues.keyVault]
+  description: Non-secret configuration should generally use ordinary configuration rather than a secret store.
+  business_impact: Unnecessary Key Vault traffic adds availability and throttling dependencies.
+  remediation: Review the sensitivity classification, then keep genuinely non-secret configuration in named values or the approved configuration system.
+  references:
+    - https://learn.microsoft.com/en-us/azure/well-architected/service-guides/azure-api-management
+- id: APIM-SEC-014
+  title: Custom-domain certificate rotation or expiry needs attention
+  pillar: SEC
+  mcsb_controls: [DP-7]
+  severity: High
+  non_prod_severity: Medium
+  evaluator: domain_certificates
+  applicability: Projected custom-domain certificates; built-in certificates excluded, platform-managed certificates accepted as a rotation alternative.
+  required_signals: [hostnameConfigurations.certificateSource, hostnameConfigurations.certificate.expiry]
+  description: Fail uploaded Custom certificates or expiry within the configured days, including equality. Missing expiry is unknown even with Key Vault linkage.
+  business_impact: Expired or manually rotated certificates can cause service outages and trust failures.
+  remediation: Prefer supported Key Vault or platform-managed rotation, configure expiry alerting and verify actual renewal and hostname binding.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/configure-custom-domain
+    - https://learn.microsoft.com/en-us/azure/well-architected/service-guides/azure-api-management
+- id: APIM-SEC-015
+  title: Sanitizer detected an inline secret pattern in policy XML
+  pillar: SEC
+  mcsb_controls: [IM-8]
+  severity: Critical
+  non_prod_severity: High
+  evaluator: inline_secrets
+  applicability: All collected local policies and fragments, including policies overridden at runtime; pattern evidence, not secret disclosure.
+  required_signals: [policies.has_inline_secret_pattern, fragments.has_inline_secret_pattern]
+  description: Retain only the boolean secret-pattern flag and source. A pattern-free scan cannot prove every secret is absent.
+  business_impact: Embedded credentials complicate rotation and can leak through configuration exports.
+  remediation: Review the original policy securely, rotate confirmed exposed credentials and replace literals with supported Key Vault-backed named values or managed identity.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-properties
+- id: APIM-SEC-016
+  title: Subscription grants access to all APIs
+  pillar: SEC
+  mcsb_controls: [PA-7]
+  severity: High
+  non_prod_severity: Medium
+  evaluator: subscription_scope
+  applicability: Collected subscription scope classifications; inactive records are reviewed before possible reactivation.
+  required_signals: [subscriptions.scope]
+  description: All-API scopes fail; explicit API/product scopes satisfy this bounded check. Unknown scope shapes do not pass.
+  business_impact: A broadly scoped shared key has a larger access blast radius.
+  remediation: Replace all-API subscriptions with the narrowest suitable API or product scope and review policy execution differences.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+- id: APIM-SEC-021
+  title: Backend certificate chain or name validation is disabled
+  pillar: SEC
+  mcsb_controls: [DP-3]
+  severity: High
+  non_prod_severity: High
+  evaluator: backend_tls
+  applicability: Non-pool backend entities and explicit TLS validation flags; newer preview CA overrides are not inferred.
+  required_signals: [backends.tls.validateCertificateChain, backends.tls.validateCertificateName]
+  description: An explicit false flag fails; both true satisfy the configuration check; omitted flags remain unknown.
+  business_impact: Disabled certificate validation can weaken authentication of a backend connection.
+  remediation: Enable both checks and deploy the correct trusted certificate chain and hostname configuration.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/backends
+- id: APIM-SEC-022
+  title: Developer portal permits anonymous access or unmanaged registration
+  pillar: SEC
+  mcsb_controls: [IM-1, IM-5]
+  severity: Medium
+  non_prod_severity: Low
+  evaluator: developer_portal
+  applicability: Enabled managed developer portals; Consumption unsupported and explicitly disabled portals not applicable.
+  required_signals: [portalconfigs.signin.require, portalsettings.signup.enabled, identityProviders.type]
+  description: Require sign-in and either disabled sign-up or a configured Entra provider. This is separate from API caller authorization and delegated registration safety.
+  business_impact: Portal contents and registration paths can be exposed to unintended users.
+  remediation: Require sign-in, prefer Microsoft Entra ID, disable unnecessary sign-up and separately review delegated registration and network access.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/secure-developer-portal-access
+    - https://learn.microsoft.com/en-us/rest/api/apimanagement/portal-config/get?view=rest-apimanagement-2024-05-01
+- id: APIM-SEC-023
+  title: Production request-tracing exposure cannot be inferred from diagnostics
+  pillar: SEC
+  severity: Medium
+  non_prod_severity: Advisory
+  evaluator: production_tracing
+  applicability: Production; current short-lived debug-token tracing has no persistent diagnostic enableTrace flag.
+  required_signals: [external debug-token and access review]
+  description: Report unsupported for the planned persistent-flag check. Do not fetch debug credentials or traces merely to inspect exposure.
+  business_impact: Trace data can contain sensitive request and response information.
+  remediation: Restrict debug-credential issuance and trace access, avoid production tracing, and review short-lived token use through authorized operational processes.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-api-inspector
+- id: APIM-SEC-024
+  title: Effective outbound policy does not suppress removable implementation headers
+  pillar: SEC
+  severity: Low
+  non_prod_severity: Low
+  evaluator: implementation_headers
+  applicability: Resolved HTTP/SOAP outbound contexts; Server deliberately excluded because APIM cannot delete it.
+  required_signals: [effective_policy.outbound]
+  description: Check final deletion of X-Powered-By and X-AspNet-Version, including later overrides and conditional paths.
+  business_impact: Implementation details can reveal unnecessary technology information.
+  remediation: Delete removable implementation headers at the final effective outbound scope; address Server at a supported upstream component instead of adding an ineffective APIM deletion.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/set-header-policy

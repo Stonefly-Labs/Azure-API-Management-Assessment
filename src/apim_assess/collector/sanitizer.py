@@ -103,7 +103,25 @@ BOOL_ATTRIBUTES = {
     "require-expiration-time",
     "validate-connectivity",
 }
-NUMBER_ATTRIBUTES = {"calls", "renewal-period", "max-count", "increment-count", "code"}
+NUMBER_ATTRIBUTES = {
+    "calls",
+    "renewal-period",
+    "max-count",
+    "increment-count",
+    "code",
+    "count",
+    "interval",
+    "timeout",
+    "timeout-ms",
+    "max-size",
+    "duration",
+}
+ENUM_ATTRIBUTES = {
+    "exists-action": {"delete", "override", "append", "skip"},
+    "size-exceeded-action": {"prevent", "detect", "ignore"},
+    "caching-type": {"internal", "external", "prefer-external"},
+}
+IMPLEMENTATION_HEADERS = {"x-powered-by", "x-aspnet-version", "server"}
 SECRET_PATTERN = re.compile(
     r"(?i)(bearer\s+\S+|(?:password|api[-_]?key|accountkey|sharedaccesssignature|"
     r"client[-_]?secret|access[-_]?token)\s*[=:]|[?&]sig=|"
@@ -158,6 +176,8 @@ def sanitize_policy(
             if key not in {
                 *BOOL_ATTRIBUTES,
                 *NUMBER_ATTRIBUTES,
+                *ENUM_ATTRIBUTES,
+                "name",
                 "fragment-id",
                 "backend-id",
                 "base-url",
@@ -182,6 +202,12 @@ def sanitize_policy(
                 safe = raw.lower()
             elif key in NUMBER_ATTRIBUTES and re.fullmatch(r"[0-9]{1,12}", raw):
                 safe = raw
+            elif key in ENUM_ATTRIBUTES and raw in ENUM_ATTRIBUTES[key]:
+                safe = raw
+            elif (
+                key == "name" and node.tag == "set-header" and raw.lower() in IMPLEMENTATION_HEADERS
+            ):
+                safe = raw.lower()
             elif raw.startswith(("@(", "@{")):
                 safe = DYNAMIC
             elif "{{" in raw:

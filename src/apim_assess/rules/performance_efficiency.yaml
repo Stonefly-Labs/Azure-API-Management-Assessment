@@ -1,0 +1,40 @@
+- id: APIM-PERF-002
+  title: Production diagnostic sampling or error body logging exceeds its budget
+  pillar: PERF
+  severity: High
+  non_prod_severity: Advisory
+  evaluator: diagnostic_sampling
+  applicability: Production APIM Application Insights diagnostics; effective runtime overhead is not measured.
+  required_signals: [diagnostics.sampling.percentage, diagnostics.alwaysLog, diagnostics.body.bytes]
+  description: Flag sampling above the configured percentage budget or allErrors with body bytes above the configured logging budget; equality does not fail.
+  business_impact: Excessive telemetry volume can increase cost and reduce gateway throughput.
+  remediation: Tune sampling against representative load and reduce header/body logging; retain enough failure evidence without using Application Insights as a per-request audit system.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-app-insights
+- id: APIM-PERF-003
+  title: Mutating operations lack a bounded preventing request size limit
+  pillar: PERF
+  severity: Medium
+  non_prod_severity: Low
+  evaluator: payload_limits
+  applicability: Explicit POST/PUT/PATCH operations in resolved HTTP/SOAP contexts.
+  required_signals: [operations.method, effective_policy.inbound]
+  description: Require validate-content with a positive max-size at most the configured budget and size-exceeded-action=prevent. The default 100 KiB is a review heuristic, not Azure's platform maximum.
+  business_impact: Oversized payload validation and buffering can reduce throughput.
+  remediation: Configure a workload-appropriate preventing request size limit and load-test schema validation. Adjust the documented budget for legitimate larger requests.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/validate-content-policy
+- id: APIM-PERF-004
+  title: GET response-cache coverage requires a cacheability review
+  pillar: PERF
+  severity: Low
+  non_prod_severity: Advisory
+  evaluator: response_cache
+  applicability: Explicit GET operations; high-read traffic and safe cacheability are not inferred from the method alone.
+  required_signals: [operations.method, effective_policy.inbound, effective_policy.outbound, external cacheability review]
+  description: A configured lookup/store pair satisfies the configuration check. Uncached GETs remain unknown, not failures, without workload suitability evidence.
+  business_impact: Suitable high-read responses can avoid repeated backend work through caching.
+  remediation: Review data sensitivity and cache isolation before adding response caching. Use an external cache where the gateway lacks built-in caching; test invalidation and vary-by requirements.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/cache-lookup-policy
+    - https://learn.microsoft.com/en-us/azure/api-management/cache-store-policy

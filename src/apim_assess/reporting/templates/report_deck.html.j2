@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
-<title>APIM assessment - Iteration 1</title>
+<title>APIM assessment - Iteration {{ iteration }}</title>
 <script>
   (() => {
     const param = new URLSearchParams(window.location.search).get("scoutTheme");
@@ -82,10 +82,10 @@ h3 { margin-top: 0; }
 .card, article, .notice { padding: 24px; border: 1px solid var(--cp-border); background: var(--cp-surface); border-radius: 16px; margin-bottom: 16px; }
 .score { font-size: 2.5rem; color: var(--cp-accent); }
 .notice { border-left: 4px solid var(--cp-warning); }
-button, select { font: inherit; background: var(--cp-surface); color: var(--cp-text); border: 1px solid var(--cp-border-strong); border-radius: 0.625rem; padding: 8px 12px; }
+button, select, input { font: inherit; background: var(--cp-surface); color: var(--cp-text); border: 1px solid var(--cp-border-strong); border-radius: 0.625rem; padding: 8px 12px; max-width: 100%; }
 button { cursor: pointer; }
 button:hover { background: var(--cp-accent-soft); }
-button:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid var(--cp-accent); outline-offset: 4px; }
+button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px solid var(--cp-accent); outline-offset: 4px; }
 button:disabled { cursor: default; color: var(--cp-text-muted); }
 a { color: var(--cp-link); overflow-wrap: anywhere; }
 code { font-family: Consolas, "Courier New", Courier, monospace; overflow-wrap: anywhere; }
@@ -96,6 +96,17 @@ th { color: var(--cp-text-muted); }
 .pass { color: var(--cp-success); }
 .fail { color: var(--cp-danger); }
 .unknown, .unsupported { color: var(--cp-text-muted); }
+.warning { color: var(--cp-warning); }
+.filters { display: flex; flex-wrap: wrap; gap: 16px; padding: 16px 0; align-items: end; }
+.filters label { display: grid; gap: 4px; flex: 1 1 180px; }
+.filters input { width: 100%; }
+summary { cursor: pointer; overflow-wrap: anywhere; }
+.finding h3 { margin: 8px 0; }
+.finding details > div { padding-top: 16px; }
+body[data-mode="slides"] .explorer-filters, body[data-mode="slides"] #explorer-nav { display: none; }
+body[data-mode="explorer"] footer { display: none; }
+#explorer-nav { padding: 16px 32px; display: flex; gap: 8px; flex-wrap: wrap; }
+button[aria-pressed="true"] { border-color: var(--cp-accent); background: var(--cp-accent-soft); }
 .badge { font-weight: 700; text-transform: uppercase; }
 svg { width: 100%; max-width: 600px; height: auto; color: var(--cp-text); }
 .node { fill: var(--cp-surface-soft); stroke: var(--cp-border-strong); }
@@ -104,7 +115,7 @@ svg text { fill: var(--cp-text); font-size: 15px; }
 [hidden] { display: none !important; }
 footer { justify-content: center; border-top: 1px solid var(--cp-border); }
 @media print {
-  header, footer { display: none; }
+  header, footer, #explorer-nav, .explorer-filters { display: none !important; }
   main { padding: 0; }
   .scope:not([hidden]) .slide[hidden] { display: block !important; }
   .slide { break-before: page; min-height: 0; }
@@ -112,26 +123,34 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
 }
 </style>
 </head>
-<body>
+<body data-mode="slides">
 <header>
   <strong>apim-assess / assessment</strong>
   <label for="scope-select">Scope</label>
   <select id="scope-select">
     {% for scope in scopes %}<option value="{{ loop.index0 }}">{{ scope.title }}</option>{% endfor %}
   </select>
+  <button id="mode" type="button" aria-pressed="false">Deep-dive explorer</button>
   <button id="theme" type="button">Toggle theme</button>
   <button id="fullscreen" type="button">Fullscreen</button>
 </header>
+<nav id="explorer-nav" aria-label="Explorer views">
+  <button type="button" data-panel="findings" aria-pressed="true">Findings</button>
+  <button type="button" data-panel="policy" aria-pressed="false">Effective policies</button>
+  <button type="button" data-panel="mcsb" aria-pressed="false">MCSB coverage</button>
+</nav>
 <main>
 {% for scope in scopes %}
 <div class="scope" id="scope-{{ loop.index0 }}">
   <section class="slide">
-    <p class="eyebrow">Iteration {{ "1" if legacy else "2" }} / assessment scope</p>
+    <p class="eyebrow">Iteration {{ iteration }} / assessment scope</p>
     <h1>API Management<br>{{ scope.title }} readout</h1>
     <p>{{ scope.instances | length }} instance(s) / collected {{ snapshot.collected_at.isoformat() }}</p>
     <p class="muted">Telemetry: {{ snapshot.telemetry_start.isoformat() }} to {{ snapshot.telemetry_end.isoformat() }} (UTC)</p>
     <div class="notice">{% if legacy %}Legacy findings: five service rules, no policy assessment.
-      {% else %}Five service rules and six policy rules.{% endif %} Not a complete MCSB compliance assessment.
+      {% elif iteration == "2" %}Five service rules and six policy rules.
+      Historical policy interpretations are preserved; rerun analyze to apply current checks.
+      {% else %}Core APIM five-pillar catalog; {{ scope.findings | length }} rule results in this scope.{% endif %} Not a complete MCSB compliance assessment.
       Unknown and unsupported signals are never treated as passes. Policy results assess configuration,
       not runtime enforcement. Adjacent-network, upstream WAF and AI gateway analysis remain outside scope.</div>
     {% for instance in scope.instances %}
@@ -156,7 +175,7 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
       <div class="card">
         <h3>{{ score.pillar }}</h3>
         <div class="score">{{ score.score if score.score is not none else "N/A" }}</div>
-        <p>{{ score.passed }} pass / {{ score.failed }} fail<br>{{ score.unknown }} unknown<br>{{ score.unsupported }} unsupported / {{ score.not_applicable }} not applicable</p>
+        <p>{{ score.passed }} pass / {{ score.failed }} fail<br>{{ score.unknown }} unknown<br>{{ score.unsupported }} unsupported / {{ score.not_applicable }} not applicable<br>{{ score.waived }} waived (excluded)</p>
         {% if score.score is none %}<small>Not assessed; not a healthy score.</small>{% endif %}
       </div>
       {% endfor %}
@@ -165,9 +184,18 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
       Critical=5, High=4, Medium=3, Low=2, Advisory=1. Portfolio scores weight individual
       results, not instance averages. Coverage counts above must accompany every score.</p>
     <p class="muted">Each rule contributes once per instance, not once per operation.
-      The policy matrix shows context coverage separately. No overall MCSB compliance score is claimed.</p>
+      The policy matrix shows context coverage separately. Waivers retain original outcomes and evidence but are excluded from scores.</p>
+    {% if iteration == "3" %}
+    <div class="card">
+      <h3>MCSB assessed-mapping rate</h3>
+      <div class="score">{{ scope.mcsb_score if scope.mcsb_score is not none else "N/A" }}</div>
+      <p>Percentage of known pass/fail control-instance mappings passing. Warning, unsupported, waived and
+        not-applicable mappings are excluded, never passes. See the MCSB coverage matrix for the denominator.
+        This is not a complete benchmark compliance score or certification.</p>
+    </div>
+    {% endif %}
   </section>
-  <section class="slide">
+  <section class="slide" data-panel="policy">
     <p class="eyebrow">Effective policy coverage / {{ scope.title }}</p>
     <h2>API &amp; operation execution contexts</h2>
     <p>Product policies are evaluated separately from non-product subscription and no-subscription requests.
@@ -209,6 +237,30 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
       </table>
     </div>
   </section>
+  <section class="slide" data-panel="mcsb">
+    <p class="eyebrow">MCSB mapped coverage / {{ scope.title }}</p>
+    <h2>Partial evidence, explicit gaps</h2>
+    <p>Microsoft flags the APIM MCSB v1 baseline as potentially outdated. Current APIM documentation governs
+      feature decisions. Mappings cover only the implemented configuration checks, not whole controls.</p>
+    <p>A control-instance row fails if any unwaived mapped check fails, warns for unavailable,
+      unsupported or waived evidence, and passes only when every applicable unwaived mapped check passes.
+      A row contributes once, regardless of how many rules map to it.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>APIM / control</th><th>Status</th><th>Pass / fail</th><th>Unknown / unsupported / waived / N/A</th><th>Mapped rules</th></tr></thead>
+        <tbody>
+        {% for row in scope.mcsb_coverage %}
+        <tr><td><code>{{ row.resource_id }}</code><br>{{ row.control }}</td>
+          <td class="{{ row.status }}">{{ row.status }}</td><td>{{ row.passed }} / {{ row.failed }}</td>
+          <td>{{ row.unknown }} / {{ row.unsupported }} / {{ row.waived }} / {{ row.not_applicable }}</td>
+          <td>{{ row.rule_ids | join(", ") }}</td></tr>
+        {% else %}<tr><td colspan="5">No stored MCSB coverage for this artifact version; not a compliance pass.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="muted">Unimplemented networking, governance and upstream WAF controls are outside this catalog,
+      not silently passed or included in the denominator.</p>
+  </section>
   <section class="slide">
     <p class="eyebrow">Topology &amp; metrics / {{ scope.title }}</p>
     <h2>Collected gateway configuration</h2>
@@ -243,14 +295,34 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
     </article>
     {% endfor %}
   </section>
-  <section class="slide">
+  <section class="slide findings-panel" data-panel="findings">
     <p class="eyebrow">Rule results / {{ scope.title }}</p>
     <h2>Evidence &amp; remediation</h2>
+    <div class="explorer-filters">
+      <div class="filters">
+        <label>Search<input class="filter-search" type="search" placeholder="Rule, resource, evidence or remediation" aria-label="Search findings"></label>
+        <label>Pillar<select class="filter-pillar"><option value="">All pillars</option>{% for pillar in ["REL", "SEC", "COST", "OPS", "PERF"] %}<option>{{ pillar }}</option>{% endfor %}</select></label>
+        <label>Severity<select class="filter-severity"><option value="">All severities</option>{% for severity in ["Critical", "High", "Medium", "Low", "Advisory"] %}<option>{{ severity }}</option>{% endfor %}</select></label>
+        <label>MCSB control<select class="filter-control"><option value="">All controls</option>{% for control in scope.controls %}<option>{{ control }}</option>{% endfor %}</select></label>
+        <label>Affected API<select class="filter-api"><option value="">All APIs / service-wide</option>{% for api in scope.apis %}<option>{{ api }}</option>{% endfor %}</select></label>
+        <label>Outcome<select class="filter-outcome"><option value="">All outcomes</option>{% for outcome in ["fail", "pass", "unknown", "unsupported", "not_applicable", "waived"] %}<option>{{ outcome }}</option>{% endfor %}</select></label>
+        <button type="button" class="reset-filters">Reset filters</button>
+      </div>
+      <p class="filter-count" role="status" aria-live="polite"></p>
+      <p class="filter-empty" hidden>No findings match these filters. Hidden results do not change scores or assessment coverage.</p>
+    </div>
     {% for finding in scope.findings %}
-    <article>
-      <p><span class="badge {{ finding.result.outcome }}">{{ finding.result.outcome }}</span> / {{ finding.severity }} / {{ finding.rule.pillar }} / {{ finding.rule.id }}</p>
-      <h3>{{ finding.rule.title }}</h3>
+    <article class="finding" data-pillar="{{ finding.rule.pillar }}" data-severity="{{ finding.severity }}"
+      data-controls="{{ finding.rule.mcsb_controls | join(' ') }}" data-apis="{{ finding_apis(finding) | join('\n') }}"
+      data-outcome="{{ 'waived' if finding.waiver_justification is not none else finding.result.outcome }}">
+      <details>
+      <summary>
+      <span class="badge {{ finding.result.outcome }}">{{ finding.result.outcome }}</span> / {{ finding.severity }} / {{ finding.rule.pillar }} / {{ finding.rule.id }}<br>
+      <strong>{{ finding.rule.title }}</strong><br>
       <code>{{ finding.resource_id }}</code>
+      </summary>
+      <div>
+      {% if finding.waiver_justification is not none %}<p class="notice"><strong>Waived (excluded from scores):</strong> {{ finding.waiver_justification }}. Original outcome and evidence retained.</p>{% endif %}
       <p>{{ finding.result.summary }}</p>
       {% for evidence in finding.result.evidence %}<p><strong>{{ evidence.source }}</strong>: {{ evidence.detail }}</p>{% endfor %}
       <p><strong>Business impact:</strong> {{ finding.rule.business_impact }}</p>
@@ -258,8 +330,16 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
       <p><strong>Applicability:</strong> {{ finding.rule.applicability }}</p>
       {% if finding.rule.mcsb_controls %}<p>MCSB mapping (partial configuration evidence): {{ finding.rule.mcsb_controls | join(", ") }}</p>{% endif %}
       {% for reference in finding.rule.references %}<p><a href="{{ reference }}" rel="noreferrer">{{ reference }}</a></p>{% endfor %}
+      </div>
+      </details>
     </article>
     {% else %}<p>No rule results.</p>{% endfor %}
+    {% if iteration == "3" %}
+    <details><summary>Saved assessment thresholds</summary>
+      {% for name, value in rule_settings.thresholds.model_dump().items() %}<p><code>{{ name }}</code>: {{ value }}</p>{% endfor %}
+      <p>Severity overrides take precedence over profile defaults. Resource-scoped waivers take precedence over global waivers.</p>
+    </details>
+    {% endif %}
   </section>
 </div>
 {% endfor %}
@@ -277,12 +357,44 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
   const select = document.getElementById("scope-select");
   const pageCount = scopes[0].querySelectorAll(".slide").length;
   let page = 0;
+  let explorer = false;
+  let panel = "findings";
+  function filter(scope) {
+    const search = scope.querySelector(".filter-search").value.trim().toLowerCase();
+    const pillar = scope.querySelector(".filter-pillar").value;
+    const severity = scope.querySelector(".filter-severity").value;
+    const control = scope.querySelector(".filter-control").value;
+    const api = scope.querySelector(".filter-api").value;
+    const outcome = scope.querySelector(".filter-outcome").value;
+    const findings = [...scope.querySelectorAll(".finding")];
+    let visible = 0;
+    findings.forEach(finding => {
+      finding.hidden = explorer && !(
+        (!search || finding.textContent.toLowerCase().includes(search)) &&
+        (!pillar || finding.dataset.pillar === pillar) &&
+        (!severity || finding.dataset.severity === severity) &&
+        (!control || finding.dataset.controls.split(" ").includes(control)) &&
+        (!api || finding.dataset.apis.split("\n").includes(api)) &&
+        (!outcome || finding.dataset.outcome === outcome)
+      );
+      if (!finding.hidden) visible++;
+    });
+    scope.querySelector(".filter-count").textContent = `${visible} of ${findings.length} findings shown. Scores include all unwaived assessed results.`;
+    scope.querySelector(".filter-empty").hidden = visible !== 0;
+  }
   function show() {
+    document.body.dataset.mode = explorer ? "explorer" : "slides";
+    document.getElementById("mode").textContent = explorer ? "Presentation mode" : "Deep-dive explorer";
+    document.getElementById("mode").setAttribute("aria-pressed", String(explorer));
+    document.querySelectorAll("#explorer-nav button").forEach(button => {
+      button.setAttribute("aria-pressed", String(button.dataset.panel === panel));
+    });
     scopes.forEach((scope, index) => {
       scope.hidden = index !== Number(select.value);
       scope.querySelectorAll(".slide").forEach((slide, position) => {
-        slide.hidden = position !== page;
+        slide.hidden = explorer ? slide.dataset.panel !== panel : position !== page;
       });
+      filter(scope);
     });
     document.getElementById("position").textContent = `Slide ${page + 1} of ${pageCount}`;
     document.getElementById("previous").disabled = page === 0;
@@ -298,6 +410,20 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
     }
   }
   select.addEventListener("change", () => { page = 0; show(); });
+  document.getElementById("mode").addEventListener("click", () => { explorer = !explorer; show(); });
+  document.querySelectorAll("#explorer-nav button").forEach(button => {
+    button.addEventListener("click", () => { panel = button.dataset.panel; show(); });
+  });
+  scopes.forEach(scope => {
+    scope.querySelectorAll(".filters input, .filters select").forEach(input => {
+      input.addEventListener("input", () => filter(scope));
+      input.addEventListener("change", () => filter(scope));
+    });
+    scope.querySelector(".reset-filters").addEventListener("click", () => {
+      scope.querySelectorAll(".filters input, .filters select").forEach(input => { input.value = ""; });
+      filter(scope);
+    });
+  });
   document.getElementById("previous").addEventListener("click", () => move(-1));
   document.getElementById("next").addEventListener("click", () => move(1));
   document.getElementById("fullscreen").addEventListener("click", fullscreen);
@@ -305,9 +431,9 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
     document.documentElement.dataset.theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
   });
   document.addEventListener("keydown", event => {
-    if (event.altKey || event.ctrlKey || event.metaKey || /^(SELECT|INPUT|BUTTON|TEXTAREA)$/.test(event.target.tagName)) return;
-    if (event.key === "ArrowRight" || event.key === " ") { event.preventDefault(); move(1); }
-    if (event.key === "ArrowLeft") { event.preventDefault(); move(-1); }
+    if (event.altKey || event.ctrlKey || event.metaKey || event.target.closest("select,input,button,textarea,summary,a,[contenteditable=true]")) return;
+    if (!explorer && (event.key === "ArrowRight" || event.key === " ")) { event.preventDefault(); move(1); }
+    if (!explorer && event.key === "ArrowLeft") { event.preventDefault(); move(-1); }
     if (event.key.toLowerCase() === "f") fullscreen();
   });
   show();

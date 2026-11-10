@@ -11,7 +11,7 @@ from apim_assess.models.findings import Evaluation
 from apim_assess.models.snapshot import Instance, Snapshot
 
 
-def low_capacity(instance: Instance, snapshot: Snapshot) -> Evaluation:
+def low_capacity(instance: Instance, snapshot: Snapshot, *, low_pct: float = 25) -> Evaluation:
     if not instance.sku:
         return Evaluation(outcome="unknown", summary="SKU was not collected.")
     if instance.sku.name in {"Developer", "Consumption"}:
@@ -37,11 +37,13 @@ def low_capacity(instance: Instance, snapshot: Snapshot) -> Evaluation:
         )
     peak = max(value for series in capacity_series(instance) for value in averages(series))
     return Evaluation(
-        outcome="fail" if peak < 25 else "pass",
+        outcome="fail" if peak < low_pct else "pass",
         summary=(
-            "Peak hourly average Capacity is below 25%; review right-sizing with workload tests."
-            if peak < 25
-            else "Peak hourly average Capacity is at least 25%; low-utilization trigger not met."
+            f"Peak hourly average Capacity is below {low_pct:g}%; "
+            "review right-sizing with workload tests."
+            if peak < low_pct
+            else f"Peak hourly average Capacity is at least {low_pct:g}%; "
+            "low-utilization trigger not met."
         ),
         evidence=evidence,
     )

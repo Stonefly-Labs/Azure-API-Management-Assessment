@@ -5,15 +5,30 @@ import os
 import tempfile
 from pathlib import Path
 
+from apim_assess.models.policy import CATALOG_METADATA_FIELDS
 from apim_assess.models.snapshot import Model, Snapshot
 
 
 def digest(snapshot: Snapshot) -> str:
-    payload = (
-        snapshot.model_dump_json(exclude={"instances": {"__all__": {"inventory"}}})
-        if snapshot.schema_version == "1.0"
-        else snapshot.model_dump_json()
-    )
+    if snapshot.schema_version == "1.0":
+        payload = snapshot.model_dump_json(
+            exclude={"instances": {"__all__": {"inventory", "service_settings"}}}
+        )
+    elif snapshot.schema_version == "1.1":
+        payload = snapshot.model_dump_json(
+            exclude={
+                "instances": {
+                    "__all__": {
+                        "service_settings": True,
+                        "inventory": {
+                            "resources": {"__all__": {"metadata": CATALOG_METADATA_FIELDS}}
+                        },
+                    }
+                },
+            }
+        )
+    else:
+        payload = snapshot.model_dump_json()
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 

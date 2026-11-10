@@ -1,0 +1,96 @@
+- id: APIM-REL-003
+  title: Dedicated gateway region has fewer than two scale units
+  pillar: REL
+  severity: High
+  non_prod_severity: Advisory
+  evaluator: scale_units
+  applicability: Known dedicated managed SKUs; Consumption has no dedicated scale units.
+  required_signals: [sku.capacity, additionalLocations]
+  description: Review every configured region for at least two scale units. Unit count alone does not establish zonal redundancy or an SLA.
+  business_impact: A single-unit deployment has less capacity redundancy during disruption and maintenance.
+  remediation: Review redundancy requirements and load-test at least two units where supported; verify zone placement separately.
+  references:
+    - https://learn.microsoft.com/en-us/azure/well-architected/service-guides/azure-api-management
+- id: APIM-REL-006
+  title: Production gateway has a single configured region
+  pillar: REL
+  severity: Medium
+  non_prod_severity: Advisory
+  evaluator: multi_region
+  applicability: Production classic Premium; unsupported tiers require an external recovery design, not an impossible in-place change.
+  required_signals: [sku, location, additionalLocations, environment]
+  description: Check distinct configured regions as a recovery design heuristic; criticality is not inferred from resource names.
+  business_impact: A regional outage can interrupt a single-region workload.
+  remediation: Review business recovery objectives and dependent services before adopting native multi-region Premium or a separately engineered recovery topology.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-deploy-multi-region
+    - https://learn.microsoft.com/en-us/azure/reliability/reliability-api-management
+- id: APIM-REL-007
+  title: Backend entity lacks circuit-breaker rules
+  pillar: REL
+  severity: Medium
+  non_prod_severity: Low
+  evaluator: circuit_breakers
+  applicability: Non-pool backend entities on supported managed tiers; Consumption unsupported.
+  required_signals: [backends, backends.circuitBreaker.rules, sku]
+  description: Require nonempty configured breaker rules; configuration does not prove runtime protection or valid thresholds.
+  business_impact: Repeated calls to an overloaded dependency can amplify an outage.
+  remediation: Configure workload-appropriate failure thresholds and trip durations, then test recovery. Counters are approximate and gateway-local.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/backends
+- id: APIM-REL-008
+  title: Review multi-endpoint backend pooling
+  pillar: REL
+  severity: Medium
+  non_prod_severity: Low
+  evaluator: backend_pooling
+  applicability: Resolved HTTP/SOAP backend references; endpoint interchangeability cannot be inferred from different routes.
+  required_signals: [backends.pool.services, effective_policy]
+  description: Referenced pools with fewer than two members fail. Multiple non-pool routes remain unknown because conditional routing is not necessarily load balancing.
+  business_impact: An ineffective pool can leave an expected failover path without redundant members.
+  remediation: For interchangeable endpoints, configure and test a multi-member backend pool with appropriate weights, priorities and member circuit breakers.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/backends
+    - https://learn.microsoft.com/en-us/azure/api-management/set-backend-service-policy
+- id: APIM-REL-009
+  title: Effective policy lacks explicit error response or error telemetry handling
+  pillar: REL
+  severity: Low
+  non_prod_severity: Low
+  evaluator: error_handling
+  applicability: Resolved HTTP/SOAP execution contexts; a handler is configuration evidence, not proof of safe behavior.
+  required_signals: [effective_policy.on-error]
+  description: Look for an error response, status or error telemetry action on every resolved on-error path.
+  business_impact: Unhandled errors can provide an inconsistent caller experience and weak diagnostic evidence.
+  remediation: Add workload-appropriate on-error handling and test fault paths without exposing sensitive error details.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
+- id: APIM-REL-010
+  title: Effective backend policy lacks explicit retry or forwarding timeout
+  pillar: REL
+  severity: Low
+  non_prod_severity: Low
+  evaluator: retry_timeout
+  applicability: Resolved HTTP/SOAP backend execution contexts.
+  required_signals: [effective_policy.backend]
+  description: Require a positive explicit forwarding timeout or a configured positive retry enclosing forwarding; ambiguous paths remain unknown.
+  business_impact: Default budgets and unreviewed transient fault behavior can delay or cascade failures.
+  remediation: Set an explicit workload-specific backend timeout. Retry only safe/idempotent operations, with bounded count and delay.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/forward-request-policy
+    - https://learn.microsoft.com/en-us/azure/api-management/retry-policy
+- id: APIM-REL-011
+  title: Recovery automation and restore readiness require external evidence
+  pillar: REL
+  mcsb_controls: [BR-1]
+  severity: Medium
+  non_prod_severity: Low
+  evaluator: recovery_readiness
+  applicability: All workloads; read-only service metadata does not establish an external DR process.
+  required_signals: [external backup schedule, APIOps pipeline, restore exercise]
+  description: Explicitly report unknown rather than infer backup automation from tags, a restore flag or API inventory.
+  business_impact: Configuration loss can become a prolonged outage without a tested recovery process.
+  remediation: Independently review backup or IaC/APIOps automation, recovery objectives and restore exercises; built-in backup capability varies by tier.
+  references:
+    - https://learn.microsoft.com/en-us/azure/well-architected/service-guides/azure-api-management
+    - https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-disaster-recovery-backup-restore

@@ -14,13 +14,14 @@ from rich.console import Console
 from apim_assess.analyzer.engine import analyze
 from apim_assess.artifacts import write_model, write_text
 from apim_assess.collector.apim_core import collect
-from apim_assess.config import AssessmentConfig, load_config
-from apim_assess.models.findings import PortfolioAssessment
+from apim_assess.config import AssessmentConfig, load_config, load_rule_settings
+from apim_assess.models.findings import PortfolioAssessment, RuleSettings
 from apim_assess.models.snapshot import Profile, Snapshot
 from apim_assess.reporting.generator import render
 
 app = typer.Typer(
-    no_args_is_help=True, help="Read-only APIM assessment. Iteration 1: five seed rules."
+    no_args_is_help=True,
+    help="Read-only APIM assessment. Core five-pillar catalog and offline explorer.",
 )
 console = Console(highlight=False, markup=False)
 
@@ -69,8 +70,10 @@ def run_collect(config: AssessmentConfig, output: Path) -> Snapshot:
     return snapshot
 
 
-def run_analyze(snapshot: Snapshot, output: Path) -> PortfolioAssessment:
-    assessment = analyze(snapshot)
+def run_analyze(
+    snapshot: Snapshot, output: Path, settings: RuleSettings | None = None
+) -> PortfolioAssessment:
+    assessment = analyze(snapshot, settings)
     write_model(output, assessment)
     console.print(f"Saved {output}: {len(assessment.findings)} rule result(s).")
     return assessment
@@ -111,11 +114,16 @@ def collect_command(
 def analyze_command(
     snapshot: Annotated[Path, typer.Option("--snapshot")],
     output: Annotated[Path, typer.Option("--output")] = Path("output/findings.json"),
+    config: Annotated[Path | None, typer.Option("--config")] = None,
 ) -> None:
     """Analyze a saved snapshot offline, without Azure credentials."""
     with input_errors():
-        distinct_paths(snapshot, output)
-        run_analyze(Snapshot.model_validate_json(snapshot.read_text(encoding="utf-8")), output)
+        distinct_paths(snapshot, output, config)
+        run_analyze(
+            Snapshot.model_validate_json(snapshot.read_text(encoding="utf-8")),
+            output,
+            load_rule_settings(config),
+        )
 
 
 @app.command("report")
@@ -161,5 +169,5 @@ def assess_command(
             lookback_days,
         )
         snapshot = run_collect(settings, snapshot_path)
-        assessment = run_analyze(snapshot, findings_path)
+        assessment = run_analyze(snapshot, findings_path, settings.rules)
         run_report(snapshot, assessment, report_path)

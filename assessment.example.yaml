@@ -1,4 +1,4 @@
-# Only Iteration 1 options are accepted; future modules/rule overrides are not implemented.
+# Only implemented options are accepted; adjacent and upstream collectors remain deferred.
 env: auto
 targets:
   instances:
@@ -11,3 +11,18 @@ modules:
   metrics: true
 telemetry:
   lookback_days: 14
+rules:
+  # Waivers retain original outcomes/evidence, but are excluded from scoring.
+  # A resource_id is optional; a matching resource waiver overrides a global one.
+  waivers: []
+  # Example: [{rule_id: APIM-REL-006, justification: "Approved recovery design"}]
+  severity_overrides: {}
+  # Example: {APIM-REL-006: Low}; overrides take precedence over profile defaults.
+  thresholds:
+    capacity_low_pct: 25
+    capacity_warning_pct: 70
+    capacity_max_pct: 85
+    cert_expiry_days: 30
+    app_insights_max_sampling_pct: 50
+    diagnostic_body_bytes: 1024
+    payload_max_bytes: 102400
