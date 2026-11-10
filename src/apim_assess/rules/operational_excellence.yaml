@@ -1,0 +1,26 @@
+- id: APIM-OPS-003
+  title: Identical inspectable inline policy blocks repeat across APIs
+  pillar: OPS
+  severity: Low
+  non_prod_severity: Low
+  evaluator: repeated_blocks
+  applicability: Fully inspectable API-local blocks with at least three nodes; exclude inherited/fragment content and duplicate revisions.
+  required_signals: [effective_policy, policy provenance]
+  description: Only identical retained semantics establish repetition; redacted values and expressions remain unknown instead of being compared as equal placeholders.
+  business_impact: Repeated inline logic makes policy changes harder to apply consistently.
+  remediation: Consider extracting genuinely identical logic into a policy fragment; preserve scope, inheritance and execution order.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/policy-fragments
+- id: APIM-OPS-004
+  title: Multiple unversioned API identities share an exact route
+  pillar: OPS
+  severity: Low
+  non_prod_severity: Low
+  evaluator: api_version_sets
+  applicability: Exact route equality within a workspace namespace; API revisions are not separate versions.
+  required_signals: [apis.path hash, apis.apiVersionSetId]
+  description: Use a pre-persistence route hash as a bounded family heuristic; names alone cannot prove version sprawl.
+  business_impact: Related APIs without lifecycle grouping can complicate compatibility and change management.
+  remediation: Review related APIs and use version sets for intentional public versions; keep revisions for compatible in-place changes.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/api-management-versions

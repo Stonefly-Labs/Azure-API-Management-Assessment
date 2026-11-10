@@ -1,0 +1,27 @@
+- id: APIM-COST-002
+  title: Non-production uses a higher-cost dedicated tier
+  pillar: COST
+  severity: Medium
+  non_prod_severity: Medium
+  evaluator: nonprod_tier
+  applicability: Non-production Standard/Premium classic or v2; production not applicable.
+  required_signals: [sku, environment]
+  description: Flag a tier cost-review opportunity, not proven waste; feature parity and load tests can justify the deployment.
+  business_impact: Non-production capacity can create unnecessary standing cost.
+  remediation: Review realistic test load, networking and required features before choosing a cheaper tier or fewer units; waive intentional production-parity deployments with justification.
+  references:
+    - https://learn.microsoft.com/en-us/azure/well-architected/service-guides/azure-api-management
+- id: APIM-COST-005
+  title: Review empty API workspaces/products and unresolved usage evidence
+  pillar: COST
+  severity: Low
+  non_prod_severity: Low
+  evaluator: unused_resources
+  applicability: Complete workspace and product API memberships; dynamic backend/named-value usage cannot be disproved by sanitized static references.
+  required_signals: [workspaces, apis, product_apis, effective_policy]
+  description: Confirmed workspaces/products without APIs trigger review; do not invent unused backend/named-value findings from missing text references.
+  business_impact: Unused configuration adds administration overhead; empty workspaces can warrant cost review.
+  remediation: Confirm ownership and actual use before removing anything. Preserve deliberate placeholders and verify dynamic references and automatic backend matching.
+  references:
+    - https://learn.microsoft.com/en-us/azure/well-architected/service-guides/azure-api-management
+    - https://learn.microsoft.com/en-us/azure/api-management/backends

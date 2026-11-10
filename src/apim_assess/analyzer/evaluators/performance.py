@@ -10,7 +10,9 @@ from apim_assess.models.findings import Evaluation
 from apim_assess.models.snapshot import Instance, Snapshot
 
 
-def saturation(instance: Instance, snapshot: Snapshot) -> Evaluation:
+def saturation(
+    instance: Instance, snapshot: Snapshot, *, warning_pct: float = 70, maximum_pct: float = 85
+) -> Evaluation:
     if not instance.sku:
         return Evaluation(outcome="unknown", summary="SKU was not collected.")
     if instance.sku.name == "Consumption":
@@ -28,11 +30,12 @@ def saturation(instance: Instance, snapshot: Snapshot) -> Evaluation:
             and series.unit == "Percent"
             and series.status == "available"
         ]
-        if (values and p95(values) > 70) or (maxima and max(maxima) > 85):
+        if (values and p95(values) > warning_pct) or (maxima and max(maxima) > maximum_pct):
             return Evaluation(
                 outcome="fail",
                 summary=(
-                    "p95 hourly average exceeds 70% or a v2 CPU/memory maximum exceeds 85%. "
+                    f"p95 hourly average exceeds {warning_pct:g}% or a v2 CPU/memory maximum "
+                    f"exceeds {maximum_pct:g}%. "
                     "Investigate duration and workload; "
                     "an isolated spike is not a scaling decision."
                 ),

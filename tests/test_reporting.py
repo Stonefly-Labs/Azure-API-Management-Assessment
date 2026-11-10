@@ -13,13 +13,16 @@ class ReportParser(HTMLParser):
         self.options = []
         self.svg_count = 0
         self.script_sources = []
+        self.scope_select = False
 
     def handle_starttag(self, tag, attrs):
         attributes = dict(attrs)
         if tag in {"script", "link", "img", "iframe", "object"}:
             if attributes.get("src") or attributes.get("href") or attributes.get("data"):
                 self.external_runtime.append((tag, attrs))
-        if tag == "option":
+        if tag == "select":
+            self.scope_select = attributes.get("id") == "scope-select"
+        if tag == "option" and self.scope_select:
             self.options.append(attributes.get("value"))
         if tag == "svg":
             self.svg_count += 1
@@ -79,3 +82,29 @@ def test_missing_rule_results_are_not_reported_as_coverage(snapshot):
     assessment.findings.pop()
     with pytest.raises(ValueError, match="every catalog rule"):
         render(snapshot, assessment)
+
+
+def test_stored_control_rollups_are_checked(snapshot):
+    assessment = analyze(snapshot)
+    assessment.mcsb_coverage[0].status = "pass"
+    assessment.mcsb_coverage[0].passed += 1
+    with pytest.raises(ValueError, match="MCSB coverage"):
+        render(snapshot, assessment)
+
+
+def test_waiver_html_is_escaped_and_explorer_uses_text_not_markup(snapshot):
+    from apim_assess.models.findings import RuleSettings, Waiver
+
+    assessment = analyze(
+        snapshot,
+        RuleSettings(
+            waivers=[
+                Waiver(rule_id="APIM-REL-001", justification='<img src=x onerror="alert(1)">'),
+            ]
+        ),
+    )
+    html = render(snapshot, assessment)
+    assert '<img src=x onerror="alert(1)">' not in html
+    assert "&lt;img" in html
+    assert "finding.textContent.toLowerCase().includes(search)" in html
+    assert ".innerHTML" not in html

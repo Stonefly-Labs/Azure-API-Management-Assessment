@@ -3,13 +3,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 from urllib.parse import quote
 
 import httpx
 from azure.identity.aio import DefaultAzureCredential
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import AwareDatetime, BaseModel, Field, ValidationError
 
 from apim_assess.collector.client import ArmReader, AzureReadError
 from apim_assess.collector.discovery import APIM_API_VERSION, discover
@@ -19,9 +19,11 @@ from apim_assess.config import AssessmentConfig
 from apim_assess.models.snapshot import (
     CollectionWarning,
     Environment,
+    HostCertificate,
     Instance,
     Region,
     ResourceId,
+    ServiceSettings,
     Sku,
     Snapshot,
 )
@@ -32,6 +34,20 @@ SAFE_CUSTOM_PROPERTIES = {
         f"Microsoft.WindowsAzure.ApiManagement.Gateway.Security.{side}Protocols.{protocol}"
         for side in ("", "Backend.")
         for protocol in ("Ssl30", "Tls10", "Tls11")
+    ),
+    *(
+        "Microsoft.WindowsAzure.ApiManagement.Gateway.Security.Ciphers." + cipher
+        for cipher in (
+            "TripleDes168",
+            "TlsRsaWithAes128CbcSha",
+            "TlsRsaWithAes256CbcSha",
+            "TlsRsaWithAes128CbcSha256",
+            "TlsRsaWithAes256CbcSha256",
+            "TlsEcdheRsaWithAes128CbcSha",
+            "TlsEcdheRsaWithAes256CbcSha",
+            "TlsEcdheRsaWithAes128CbcSha256",
+            "TlsEcdheRsaWithAes256CbcSha384",
+        )
     ),
 }
 
@@ -63,12 +79,30 @@ class _Identity(BaseModel):
     type: Literal["None", "SystemAssigned", "UserAssigned", "SystemAssigned, UserAssigned"]
 
 
+class _Constraint(BaseModel):
+    minApiVersion: date | None = None
+
+
+class _Certificate(BaseModel):
+    expiry: AwareDatetime | None = None
+
+
+class _Hostname(BaseModel):
+    type: Literal["Proxy", "Portal", "Management", "Scm", "DeveloperPortal"]
+    certificateSource: Literal["KeyVault", "Custom", "Managed", "BuiltIn"] | None = None
+    keyVaultId: str | None = None
+    certificate: _Certificate | None = None
+
+
 class _Properties(BaseModel):
     additionalLocations: list[_Location] | None = None
     virtualNetworkType: Literal["None", "Internal", "External"] | None = None
     publicNetworkAccess: Literal["Enabled", "Disabled"] | None = None
     privateEndpointConnections: list[_Connection] | None = None
     customProperties: dict[str, object] = Field(default_factory=dict)
+    apiVersionConstraint: _Constraint | None = None
+    hostnameConfigurations: list[_Hostname] | None = None
+    developerPortalStatus: Literal["Enabled", "Disabled"] | None = None
 
 
 class _Service(BaseModel):
@@ -158,6 +192,28 @@ def project_service(
         for key, value in props.customProperties.items()
         if key in SAFE_CUSTOM_PROPERTIES and str(value).casefold() in {"true", "false"}
     }
+    instance.service_settings = ServiceSettings(
+        minimum_api_version=(
+            props.apiVersionConstraint.minApiVersion if props.apiVersionConstraint else None
+        ),
+        portal_enabled=(
+            props.developerPortalStatus == "Enabled"
+            if props.developerPortalStatus is not None
+            else None
+        ),
+        certificates=(
+            [
+                HostCertificate(
+                    endpoint=hostname.type,
+                    source="KeyVault" if hostname.keyVaultId else hostname.certificateSource,
+                    expires_at=hostname.certificate.expiry if hostname.certificate else None,
+                )
+                for hostname in props.hostnameConfigurations
+            ]
+            if props.hostnameConfigurations is not None
+            else None
+        ),
+    )
     return instance
 
 
@@ -224,9 +280,15 @@ async def _collect(config: AssessmentConfig, reader: ArmReader) -> Snapshot:
                 reader, instance, start, end, warnings, enabled=config.modules.metrics
             )
             if service is not None:
-                instance.inventory = await SubresourceCollector(
-                    reader, identifier, warnings
-                ).collect()
+                collector = SubresourceCollector(reader, identifier, warnings)
+                instance.inventory = await collector.collect()
+                if instance.service_settings is not None:
+                    await collector.settings(
+                        instance.service_settings,
+                        classic=instance.sku is not None
+                        and instance.sku.name in {"Developer", "Basic", "Standard", "Premium"},
+                        portal=instance.sku is not None and instance.sku.name != "Consumption",
+                    )
             return instance
 
     instances = await asyncio.gather(*(one(identifier) for identifier in identifiers))

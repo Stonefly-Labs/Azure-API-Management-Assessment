@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -14,7 +15,7 @@ from pydantic import (
     model_validator,
 )
 
-from apim_assess.models.policy import Inventory
+from apim_assess.models.policy import CATALOG_METADATA_FIELDS, Inventory
 
 Environment = Literal["prod", "non-prod"]
 Profile = Literal["auto", "prod", "non-prod"]
@@ -99,6 +100,22 @@ class MetricSeries(Model):
         return self
 
 
+class HostCertificate(Model):
+    endpoint: Literal["Proxy", "Portal", "Management", "Scm", "DeveloperPortal"]
+    source: Literal["KeyVault", "Custom", "Managed", "BuiltIn"] | None = None
+    expires_at: AwareDatetime | None = None
+
+
+class ServiceSettings(Model):
+    minimum_api_version: date | None = None
+    certificates: list[HostCertificate] | None = None
+    portal_enabled: bool | None = None
+    portal_signin_required: bool | None = None
+    portal_signup_enabled: bool | None = None
+    portal_entra_enabled: bool | None = None
+    management_api_enabled: bool | None = None
+
+
 class Instance(Model):
     resource_id: ResourceId
     name: str
@@ -116,10 +133,11 @@ class Instance(Model):
     custom_properties: dict[str, bool] = Field(default_factory=dict)
     metrics: list[MetricSeries] = Field(default_factory=list)
     inventory: Inventory | None = None
+    service_settings: ServiceSettings | None = None
 
 
 class Snapshot(Model):
-    schema_version: Literal["1.0", "1.1"] = "1.1"
+    schema_version: Literal["1.0", "1.1", "1.2"] = "1.2"
     collected_at: AwareDatetime
     telemetry_start: AwareDatetime
     telemetry_end: AwareDatetime
@@ -134,6 +152,19 @@ class Snapshot(Model):
         if len(set(ids)) != len(ids):
             raise ValueError("Duplicate APIM resource IDs")
         for instance in self.instances:
+            if self.schema_version != "1.2" and (
+                instance.service_settings is not None
+                or instance.inventory is not None
+                and any(
+                    item.kind == "logger"
+                    or any(
+                        getattr(item.metadata, field) is not None
+                        for field in CATALOG_METADATA_FIELDS
+                    )
+                    for item in instance.inventory.resources
+                )
+            ):
+                raise ValueError("Catalog metadata requires snapshot schema 1.2")
             if self.schema_version == "1.0" and instance.inventory is not None:
                 raise ValueError("Sub-resource inventory requires snapshot schema 1.1")
             if instance.inventory is not None:

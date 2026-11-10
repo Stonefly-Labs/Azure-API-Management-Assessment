@@ -44,8 +44,8 @@ class Credential:
         pass
 
 
-def entity(path, **properties):
-    return {"id": ID + "/" + path, "properties": properties}
+def entity(resource_path, **properties):
+    return {"id": ID + "/" + resource_path, "properties": properties}
 
 
 def handler(request):
@@ -64,6 +64,18 @@ def handler(request):
                     "privateEndpointConnections": [],
                     "additionalLocations": [],
                     "publicNetworkAccess": "Enabled",
+                    "apiVersionConstraint": {"minApiVersion": "2021-08-01"},
+                    "developerPortalStatus": "Enabled",
+                    "hostnameConfigurations": [
+                        {
+                            "type": "Proxy",
+                            "certificateSource": "KeyVault",
+                            "keyVaultId": SECRET,
+                            "certificatePassword": SECRET,
+                            "hostName": SECRET,
+                            "certificate": {"expiry": "2030-01-01T00:00:00Z", "subject": SECRET},
+                        }
+                    ],
                 },
             },
         )
@@ -76,6 +88,7 @@ def handler(request):
                 type="http",
                 protocols=["https"],
                 serviceUrl=f"https://example.test/?api_key={SECRET}",
+                path="orders",
             ),
         ],
         "apis/orders/operations": [
@@ -126,6 +139,9 @@ def handler(request):
         "diagnostics": [
             entity("diagnostics/appinsights", sampling={"percentage": 5}, secret=SECRET)
         ],
+        "loggers": [
+            entity("loggers/telemetry", loggerType="applicationInsights", credentials=SECRET)
+        ],
         "gateways": [entity("gateways/self-hosted", credentials=SECRET)],
         "workspaces": [entity("workspaces/team", description=SECRET)],
         "workspaces/team/apis": [
@@ -167,6 +183,12 @@ def handler(request):
         )
     if path == "policies/policy":
         return httpx.Response(200, json={"properties": {"format": "rawxml", "value": GLOBAL}})
+    if path == "tenant/access" or path == "portalsettings/signup":
+        return httpx.Response(200, json={"properties": {"enabled": False, "secret": SECRET}})
+    if path == "portalconfigs/default":
+        return httpx.Response(
+            200, json={"properties": {"signin": {"require": True}, "secret": SECRET}}
+        )
     if path == "policyFragments/auth":
         return httpx.Response(200, json={"properties": {"format": "rawxml", "value": FRAGMENT}})
     if path.endswith("/policies/policy"):
@@ -199,6 +221,7 @@ def test_paginated_all_kinds_workspace_policies_and_safe_metadata_projection():
         "diagnostic",
         "gateway",
         "workspace",
+        "logger",
     }
     assert len([item for item in inventory.resources if item.kind == "api"]) == 3
     assert inventory.collections["apis"].count == 2
@@ -206,11 +229,78 @@ def test_paginated_all_kinds_workspace_policies_and_safe_metadata_projection():
     assert set(warning.module for warning in snapshot.collection_warnings) == {"metrics"}
     assert SECRET not in snapshot.model_dump_json()
     assessment = analyze(snapshot)
-    assert len(assessment.findings) == 11
+    assert len(assessment.findings) == 40
     assert len(assessment.policy_coverage) == 4
     assert all(row.jwt == "present" for row in assessment.policy_coverage)
     assert any(item.metadata.key_vault for item in inventory.resources)
     assert any(item.metadata.credentials_present for item in inventory.resources)
+    settings = snapshot.instances[0].service_settings
+    assert str(settings.minimum_api_version) == "2021-08-01"
+    assert settings.certificates[0].source == "KeyVault"
+    assert settings.portal_signin_required is True
+    assert settings.portal_signup_enabled is False
+    assert settings.management_api_enabled is False
+    assert (
+        next(
+            item for item in inventory.resources if item.kind == "subscription"
+        ).metadata.subscription_scope
+        == "product"
+    )
+
+
+@pytest.mark.parametrize(
+    ("scope", "expected"),
+    [
+        (ID + "/apis", "all_apis"),
+        ("/apis/orders", "api"),
+        (ID + "/products/apis", "product"),
+        ("/products/apis", "product"),
+    ],
+)
+def test_subscription_scope_does_not_confuse_a_product_named_apis(scope, expected):
+    def route(request):
+        if request.url.path == ID + "/subscriptions":
+            return httpx.Response(200, json={"value": [entity("subscriptions/sub", scope=scope)]})
+        return handler(request)
+
+    snapshot = asyncio.run(collection(route))
+    subscription = next(
+        item for item in snapshot.instances[0].inventory.resources if item.kind == "subscription"
+    )
+    assert subscription.metadata.subscription_scope == expected
+
+
+@pytest.mark.parametrize(
+    ("members", "expected"),
+    [
+        ([{"id": ID + "/backends/a"}, {"id": ID + "/backends/b"}], 2),
+        ([{"id": ID + "/backends/a"}, {"id": (ID + "/backends/a").upper()}], 1),
+        ([{"id": ID + "/backends/a"}, {"id": SECRET}], None),
+        ([{"id": ID + "/backends/a"}, {}], None),
+    ],
+)
+def test_backend_pool_counts_distinct_valid_members_without_saving_references(members, expected):
+    def route(request):
+        if request.url.path == ID + "/backends":
+            return httpx.Response(
+                200,
+                json={
+                    "value": [entity("backends/orders", type="Pool", pool={"services": members})]
+                },
+            )
+        return handler(request)
+
+    snapshot = asyncio.run(collection(route))
+    inventory = snapshot.instances[0].inventory
+    backend = next((item for item in inventory.resources if item.kind == "backend"), None)
+    if expected is None:
+        assert backend is None
+        assert inventory.collections["backends"].status == "partial"
+        assert any(warning.code == "INVALID_METADATA" for warning in snapshot.collection_warnings)
+    else:
+        assert backend.metadata.pool_member_count == expected
+    assert SECRET not in snapshot.model_dump_json()
+    assert ID + "/backends/a" not in snapshot.model_dump_json()
 
 
 @pytest.mark.parametrize(
@@ -325,7 +415,7 @@ def test_composed_policy_pipeline_and_offline_replay_agree(tmp_path, monkeypatch
     )
     assert result.exit_code == 0, result.output
     saved = Snapshot.model_validate_json((directory / "snapshot.json").read_text())
-    assert saved.schema_version == "1.1"
+    assert saved.schema_version == "1.2"
     assert saved.instances[0].inventory
 
     def forbidden(*args, **kwargs):

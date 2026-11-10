@@ -38,7 +38,7 @@ def test_offline_stages_do_not_instantiate_azure_credentials(tmp_path, monkeypat
         ],
     )
     assert result.exit_code == 0, result.output
-    assert len(PortfolioAssessment.model_validate_json(findings.read_text()).findings) == 33
+    assert len(PortfolioAssessment.model_validate_json(findings.read_text()).findings) == 120
     assert "Portfolio readout" in report.read_text()
 
 
@@ -170,3 +170,68 @@ def test_schema_error_does_not_echo_secret_input(tmp_path):
     result = RUNNER.invoke(app, ["collect", "--config", str(config)])
     assert result.exit_code == 2
     assert "PRIVATE_SENTINEL" not in result.output
+
+
+def test_rule_configuration_composes_and_replays_offline(snapshot, tmp_path, monkeypatch):
+    async def mocked(config):
+        return snapshot
+
+    monkeypatch.setattr("apim_assess.cli.collect", mocked)
+    config = tmp_path / "settings.yaml"
+    config.write_text(
+        "rules:\n  waivers:\n"
+        "    - rule_id: APIM-REL-006\n      justification: Approved recovery\n"
+        "  severity_overrides: {APIM-REL-006: Low}\n"
+        "  thresholds: {capacity_warning_pct: 65}\n"
+    )
+    composed = tmp_path / "composed"
+    result = RUNNER.invoke(
+        app,
+        [
+            "assess",
+            "--resource-id",
+            snapshot.instances[0].resource_id,
+            "--config",
+            str(config),
+            "--output-dir",
+            str(composed),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    replay = tmp_path / "replay.json"
+    result = RUNNER.invoke(
+        app,
+        [
+            "analyze",
+            "--snapshot",
+            str(composed / "snapshot.json"),
+            "--config",
+            str(config),
+            "--output",
+            str(replay),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert replay.read_bytes() == (composed / "findings.json").read_bytes()
+    assessment = PortfolioAssessment.model_validate_json(replay.read_text())
+    assert assessment.rule_settings.thresholds.capacity_warning_pct == 65
+    assert all(
+        item.waiver_justification == "Approved recovery" and item.severity == "Low"
+        for item in assessment.findings
+        if item.rule.id == "APIM-REL-006"
+    )
+    replay_html = tmp_path / "replay.html"
+    result = RUNNER.invoke(
+        app,
+        [
+            "report",
+            "--snapshot",
+            str(composed / "snapshot.json"),
+            "--findings",
+            str(replay),
+            "--output",
+            str(replay_html),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert replay_html.read_bytes() == (composed / "apim-assessment-report.html").read_bytes()
