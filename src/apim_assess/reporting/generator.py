@@ -6,6 +6,7 @@ from jinja2 import Environment, StrictUndefined
 
 from apim_assess.analyzer.engine import (
     ITERATION_2_IDS,
+    ITERATION_4_IDS,
     SEED_IDS,
     load_rules,
     mcsb_coverage,
@@ -71,8 +72,12 @@ def render(snapshot: Snapshot, assessment: PortfolioAssessment) -> str:
     rules = [
         rule
         for rule in load_rules()
-        if assessment.schema_version == "1.2"
-        or rule.id in (SEED_IDS if assessment.schema_version == "1.0" else ITERATION_2_IDS)
+        if assessment.schema_version == "1.3"
+        or (
+            rule.id not in ITERATION_4_IDS
+            if assessment.schema_version == "1.2"
+            else rule.id in (SEED_IDS if assessment.schema_version == "1.0" else ITERATION_2_IDS)
+        )
     ]
     expected = {(identifier, rule.id) for identifier in identities for rule in rules}
     if set(pairs) != expected:
@@ -101,7 +106,7 @@ def render(snapshot: Snapshot, assessment: PortfolioAssessment) -> str:
         raise ValueError("Finding environments do not match the snapshot.")
     if assessment.pillar_scores != scores(assessment.findings):
         raise ValueError("Stored pillar scores do not agree with the findings.")
-    if assessment.schema_version == "1.2":
+    if assessment.schema_version in {"1.2", "1.3"}:
         validate_settings(assessment.rule_settings, snapshot)
         if assessment.mcsb_coverage != mcsb_coverage(assessment.findings) or (
             assessment.mcsb_assessed_score != mcsb_score(assessment.mcsb_coverage)
@@ -194,7 +199,7 @@ def render(snapshot: Snapshot, assessment: PortfolioAssessment) -> str:
         scopes=scopes,
         metric_summary=metric_summary,
         legacy=assessment.schema_version == "1.0",
-        iteration={"1.0": "1", "1.1": "2", "1.2": "3"}[assessment.schema_version],
+        iteration={"1.0": "1", "1.1": "2", "1.2": "3", "1.3": "4"}[assessment.schema_version],
         finding_apis=finding_apis,
         rule_settings=assessment.rule_settings,
     )

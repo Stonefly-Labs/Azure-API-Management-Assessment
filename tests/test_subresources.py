@@ -49,7 +49,15 @@ def entity(resource_path, **properties):
 
 
 def handler(request):
+    if (
+        request.url.path
+        == ID + "/providers/Microsoft.PolicyInsights/policyStates/latest/queryResults"
+    ):
+        assert request.method == "POST"
+        return httpx.Response(200, json={"value": []})
     assert request.method == "GET"
+    if request.url.path.endswith("/pricings/Api"):
+        return httpx.Response(200, json={"properties": {"pricingTier": "Free"}})
     assert "listSecrets" not in request.url.path
     if request.url.path == ID:
         return httpx.Response(
@@ -226,10 +234,13 @@ def test_paginated_all_kinds_workspace_policies_and_safe_metadata_projection():
     assert len([item for item in inventory.resources if item.kind == "api"]) == 3
     assert inventory.collections["apis"].count == 2
     assert all(coverage.status == "complete" for coverage in inventory.collections.values())
-    assert set(warning.module for warning in snapshot.collection_warnings) == {"metrics"}
+    assert set(warning.module for warning in snapshot.collection_warnings) == {
+        "metrics",
+        "log_analytics",
+    }
     assert SECRET not in snapshot.model_dump_json()
     assessment = analyze(snapshot)
-    assert len(assessment.findings) == 40
+    assert len(assessment.findings) == 47
     assert len(assessment.policy_coverage) == 4
     assert all(row.jwt == "present" for row in assessment.policy_coverage)
     assert any(item.metadata.key_vault for item in inventory.resources)
@@ -415,7 +426,7 @@ def test_composed_policy_pipeline_and_offline_replay_agree(tmp_path, monkeypatch
     )
     assert result.exit_code == 0, result.output
     saved = Snapshot.model_validate_json((directory / "snapshot.json").read_text())
-    assert saved.schema_version == "1.2"
+    assert saved.schema_version == "1.3"
     assert saved.instances[0].inventory
 
     def forbidden(*args, **kwargs):

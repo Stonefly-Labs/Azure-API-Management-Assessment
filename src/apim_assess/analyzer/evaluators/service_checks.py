@@ -1,5 +1,6 @@
 from datetime import date
 
+from apim_assess.analyzer.evaluators.adjacent_checks import log_evidence
 from apim_assess.analyzer.evaluators.checks import Check, Context, boolean, combine, result
 from apim_assess.collector.apim_core import SAFE_CUSTOM_PROPERTIES
 from apim_assess.collector.sanitizer import reference_id
@@ -127,7 +128,7 @@ def weak_tls(ctx: Context) -> Evaluation:
         key for key in SAFE_CUSTOM_PROPERTIES if "Protocols." in key and not key.endswith("Http2")
     )
     observed = [(key, ctx.instance.custom_properties.get(key)) for key in keys]
-    return combine(
+    evaluation = combine(
         [
             (
                 boolean(value, good=False),
@@ -142,6 +143,19 @@ def weak_tls(ctx: Context) -> Evaluation:
             "omitted flags have no assumed default."
         ),
     )
+    logs = ctx.instance.log_analytics
+    if logs is not None and any(
+        workspace.aggregate is not None and workspace.aggregate.weak_tls > 0
+        for workspace in logs.workspaces
+    ):
+        evaluation.outcome = "fail"
+        evaluation.summary = (
+            "Legacy TLS 1.0/1.1 requests were observed in the logged sample. "
+            "A disabled service flag cannot override positive runtime evidence."
+        )
+    if logs is not None:
+        evaluation.evidence.extend(log_evidence(ctx))
+    return evaluation
 
 
 def weak_ciphers(ctx: Context) -> Evaluation:

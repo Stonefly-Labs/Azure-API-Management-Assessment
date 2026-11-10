@@ -29,10 +29,15 @@ class Targets(Model):
 
 class Modules(Model):
     metrics: bool = True
+    networking: bool = True
+    defender_policy: bool = True
+    log_analytics_kql: bool = False
 
 
 class Telemetry(Model):
     lookback_days: int = Field(default=14, ge=1, le=30)
+    kql_max_rows: int = Field(default=5, ge=1, le=100)
+    kql_timeout_seconds: int = Field(default=30, ge=1, le=180)
 
 
 class AssessmentConfig(Model):
@@ -44,6 +49,8 @@ class AssessmentConfig(Model):
 
     @model_validator(mode="after")
     def consistent_targets(self) -> AssessmentConfig:
+        if self.modules.log_analytics_kql and not self.modules.defender_policy:
+            raise ValueError("Log Analytics requires diagnostic linkage from defender_policy")
         seen: dict[str, Environment | None] = {}
         for target in self.targets.instances:
             key = target.resource_id.casefold()

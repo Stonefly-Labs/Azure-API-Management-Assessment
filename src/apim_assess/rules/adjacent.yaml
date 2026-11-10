@@ -1,0 +1,112 @@
+- id: APIM-SEC-003
+  title: Injected gateway subnet NSG configuration needs attention
+  pillar: SEC
+  mcsb_controls: [NS-1]
+  severity: High
+  non_prod_severity: Medium
+  evaluator: subnet_nsg
+  applicability: Classic Developer/Premium injection and Premium v2 internal injection. Outbound-only v2 integration and private endpoint subnet controls are separate.
+  required_signals: [sku, virtualNetworkType, linked subnets, attached NSG custom and default inbound rules, subnet collection coverage]
+  description: Fail confirmed missing NSGs, priority-effective broad public TCP 80/443 allowances, or explicit blocking of classic ApiManagement 3443/AzureLoadBalancer 6390 prerequisites. Specific address/ASG exceptions remain unknown; classic ports are not imposed on v2.
+  business_impact: Overbroad gateway allowances weaken segmentation; blocked platform dependencies can interrupt service management or availability.
+  remediation: Attach an NSG, review priority and destination scope, restrict gateway sources to the intended ingress, and preserve the tier-specific platform prerequisites. Independently validate routing and connectivity; no WAF bypass conclusion is made.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/virtual-network-reference
+    - https://learn.microsoft.com/en-us/azure/api-management/inject-vnet-v2
+    - https://learn.microsoft.com/en-us/azure/api-management/integrate-vnet-outbound
+    - https://learn.microsoft.com/en-us/rest/api/virtualnetwork/subnets/get?view=rest-virtualnetwork-2026-01-01
+    - https://learn.microsoft.com/en-us/azure/api-management/security-baseline
+- id: APIM-REL-004
+  title: Primary-region gateway lacks configured elastic scale-out
+  pillar: REL
+  severity: High
+  non_prod_severity: Low
+  evaluator: autoscale
+  applicability: Basic/Standard/Premium classic and v2 managed services. Developer unsupported; Consumption automatically scales and is not applicable.
+  required_signals: [sku, subscription autoscale list coverage, exact targetResourceUri, enabled profiles and scale actions]
+  description: Require enabled elastic profiles with positive scale-out actions. Check all enabled profiles; this is a configuration review heuristic, not proof of correct triggers or business suitability.
+  business_impact: Fixed capacity or incomplete scale-out configuration can leave the primary gateway unable to absorb changing demand.
+  remediation: Configure workload-tested Azure Monitor autoscale with suitable bounds, triggers and cooldowns, or document an approved fixed-capacity alternative. Native autoscale covers primary-region units only; secondary-region custom automation requires separate review.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-autoscale
+    - https://learn.microsoft.com/en-us/rest/api/monitor/autoscale-settings/list-by-subscription?view=rest-monitor-2022-10-01
+- id: APIM-COST-003
+  title: Configured elastic autoscale profile lacks scale-in
+  pillar: COST
+  severity: Medium
+  non_prod_severity: Low
+  evaluator: scale_in
+  applicability: Enabled elastic autoscale profiles on supported managed tiers. Absent autoscale and deliberately fixed profiles are not applicable to this specific check.
+  required_signals: [autoscale list coverage, enabled, profiles.capacity, profiles.rules.scaleAction]
+  description: Every enabled profile with maximum above minimum needs a positive decrease action. Disabled settings cannot establish a pass and incomplete collection remains unknown.
+  business_impact: Scale-out without a corresponding scale-in configuration can retain unnecessary off-peak capacity.
+  remediation: Add workload-tested scale-in rules with conservative cooldowns and sufficient redundancy floors; validate interactions with scheduled profiles and other scaling automation.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-autoscale
+    - https://learn.microsoft.com/en-us/rest/api/monitor/autoscale-settings/list-by-subscription?view=rest-monitor-2022-10-01
+- id: APIM-OPS-001
+  title: No enabled GatewayLogs diagnostic destination is established
+  pillar: OPS
+  mcsb_controls: [LT-4]
+  severity: High
+  non_prod_severity: Medium
+  evaluator: resource_diagnostics
+  applicability: Resource diagnostic settings on supported managed tiers; Consumption resource logs are unsupported. APIM Application Insights diagnostics are a separate signal.
+  required_signals: [resource diagnostic settings coverage, logs.category or categoryGroup, enabled, destination linkage]
+  description: An enabled GatewayLogs category or allLogs group with a configured destination satisfies this bounded check. Missing settings fail only after a complete list; configuration does not prove ingestion or retention.
+  business_impact: Missing gateway log routing reduces investigation and operational troubleshooting evidence.
+  remediation: Configure resource diagnostic GatewayLogs to an approved workspace, storage, Event Hub or supported partner destination; separately verify ingestion, retention, access and data masking.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-use-azure-monitor
+    - https://learn.microsoft.com/en-us/rest/api/monitor/diagnostic-settings/list?view=rest-monitor-2021-05-01-preview
+    - https://learn.microsoft.com/en-us/azure/api-management/security-baseline
+- id: APIM-OPS-005
+  title: Fresh Azure Policy evaluations report noncompliance
+  pillar: OPS
+  mcsb_controls: [AM-2]
+  severity: Medium
+  non_prod_severity: Low
+  evaluator: policy_compliance
+  applicability: Latest evaluations for this exact APIM service. No deployment, remediation, scan trigger, or policy modification is performed.
+  required_signals: [resource-scoped latest policy states coverage, complianceState, timestamp, assignment and definition references, policyDefinitionReferenceId]
+  description: Assess latest states per assignment, definition and initiative reference without collapsing distinct initiative entries. Retain all states at tied latest timestamps. Fresh NonCompliant states fail; Compliant states satisfy the observed evaluation check. Exempt is not applicable. Empty, stale, future, conflict/error/unknown and incomplete evidence cannot establish a pass. Default freshness is two days, an assessment heuristic.
+  business_impact: Noncompliant configuration can violate centrally assigned governance requirements.
+  remediation: Review the identified assignment and definition securely, confirm evaluation freshness, then remediate through the approved change process or document an appropriate exemption.
+  references:
+    - https://learn.microsoft.com/en-us/rest/api/policyinsights/policy-states/list-query-results-for-resource?view=rest-policyinsights-2024-10-01
+    - https://learn.microsoft.com/en-us/azure/governance/policy/how-to/get-compliance-data
+    - https://learn.microsoft.com/en-us/security/benchmark/azure/mcsb-asset-management
+- id: APIM-SEC-025
+  title: Supported REST APIs lack Defender plan or onboarding coverage
+  pillar: SEC
+  mcsb_controls: [LT-1]
+  severity: High
+  non_prod_severity: Medium
+  evaluator: defender
+  applicability: Documented supported classic tiers and primary regions, REST APIs on the managed gateway only. Consumption/v2, workspace APIs and self-hosted runtime coverage are not inferred.
+  required_signals: [sku, primary region, complete API inventory and API types, Defender Api pricing tier, service-scoped API collections coverage]
+  description: Check both the subscription Standard Api plan and explicit onboarding of every supported REST API. Unknown API types are not assumed REST; an empty or denied list does not prove protection. Supported regions follow Microsoft guidance verified November 10 2026.
+  business_impact: Enabling a subscription plan alone leaves APIs without the intended runtime threat detection until onboarded.
+  remediation: Verify current tier/region/protocol support and an appropriate Defender for APIs plan, then onboard eligible APIs through the approved process and independently verify alert coverage. This tool changes neither plan nor onboarding.
+  references:
+    - https://learn.microsoft.com/en-us/azure/defender-for-cloud/defender-for-apis-prepare
+    - https://learn.microsoft.com/en-us/azure/defender-for-cloud/defender-for-apis-deploy
+    - https://learn.microsoft.com/en-us/rest/api/defenderforcloud/pricings/get?view=rest-defenderforcloud-2024-01-01
+    - https://learn.microsoft.com/en-us/rest/api/defenderforcloud/api-collections/list-by-azure-api-management-service?view=rest-defenderforcloud-2023-11-15
+    - https://learn.microsoft.com/en-us/azure/api-management/security-baseline
+- id: APIM-PERF-005
+  title: Logged backend latency or gateway 5xx sample exceeds review thresholds
+  pillar: PERF
+  severity: High
+  non_prod_severity: Medium
+  evaluator: backend_health
+  applicability: Optional linked-workspace GatewayLogs samples for the collection window. Consumption resource logs are unsupported; absent or empty logs are unknown.
+  required_signals: [diagnostic workspace linkage coverage, aggregate query completion, response-code and backend-time sample counts, backend latency p95, gateway 5xx counts]
+  description: Fail observed backend request p95 above 2000 ms or gateway 5xx above 1 percent, with configurable thresholds and strict greater-than boundaries. Incomplete response/latency coverage cannot pass. Separate workspace/table samples are never combined into a fabricated percentile or duplicated population.
+  business_impact: High backend latency and gateway error rates can degrade caller experience and availability.
+  remediation: Investigate the bounded hashed API hotspots using secured operational logs, validate logging/sampling coverage, and review backend capacity, timeouts and resilience. Aggregate cache hit/miss counts are context, not proof that caching is appropriate.
+  references:
+    - https://learn.microsoft.com/en-us/azure/azure-monitor/reference/tables/apimanagementgatewaylogs
+    - https://learn.microsoft.com/en-us/azure/azure-monitor/reference/queries/apimanagementgatewaylogs
+    - https://learn.microsoft.com/en-us/kusto/query/percentiles-aggregation-function
+    - https://learn.microsoft.com/en-us/rest/api/logsquery/query/get?view=rest-logsquery-v1

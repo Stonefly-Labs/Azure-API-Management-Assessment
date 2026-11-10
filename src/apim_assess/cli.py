@@ -21,7 +21,7 @@ from apim_assess.reporting.generator import render
 
 app = typer.Typer(
     no_args_is_help=True,
-    help="Read-only APIM assessment. Core five-pillar catalog and offline explorer.",
+    help="Read-only APIM assessment. Five-pillar catalog, adjacent signals and offline explorer.",
 )
 console = Console(highlight=False, markup=False)
 
@@ -95,7 +95,7 @@ def collect_command(
     lookback_days: Annotated[int | None, typer.Option("--lookback-days", min=1, max=30)] = None,
     output: Annotated[Path, typer.Option("--output")] = Path("output/snapshot.json"),
 ) -> None:
-    """Collect core service metadata and metrics from explicit Azure targets."""
+    """Collect sanitized APIM and enabled adjacent signals from explicit Azure targets."""
     with input_errors():
         distinct_paths(config, output)
         settings = load_config(

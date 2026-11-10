@@ -549,7 +549,7 @@ def test_invalid_rule_configuration_is_rejected(data):
 
 def test_unknown_and_deferred_overrides_are_not_silently_ignored(catalog_snapshot):
     with pytest.raises(ValueError, match="deferred rule"):
-        analyze(catalog_snapshot, RuleSettings(severity_overrides={"APIM-SEC-025": "Low"}))
+        analyze(catalog_snapshot, RuleSettings(severity_overrides={"APIM-SEC-004": "Low"}))
     with pytest.raises(ValueError, match="does not match"):
         analyze(
             catalog_snapshot,
@@ -638,6 +638,9 @@ def test_iteration_two_digest_and_findings_are_still_reportable(catalog_snapshot
             "instances": {
                 "__all__": {
                     "service_settings": True,
+                    "networking": True,
+                    "governance": True,
+                    "log_analytics": True,
                     "inventory": {"resources": {"__all__": {"metadata": CATALOG_METADATA_FIELDS}}},
                 }
             },

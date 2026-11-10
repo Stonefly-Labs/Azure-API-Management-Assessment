@@ -10,9 +10,10 @@ from apim_assess.models.snapshot import Model, Snapshot
 
 
 def digest(snapshot: Snapshot) -> str:
+    adjacent = {"networking", "governance", "log_analytics"}
     if snapshot.schema_version == "1.0":
         payload = snapshot.model_dump_json(
-            exclude={"instances": {"__all__": {"inventory", "service_settings"}}}
+            exclude={"instances": {"__all__": {"inventory", "service_settings"} | adjacent}}
         )
     elif snapshot.schema_version == "1.1":
         payload = snapshot.model_dump_json(
@@ -20,6 +21,7 @@ def digest(snapshot: Snapshot) -> str:
                 "instances": {
                     "__all__": {
                         "service_settings": True,
+                        **dict.fromkeys(adjacent, True),
                         "inventory": {
                             "resources": {"__all__": {"metadata": CATALOG_METADATA_FIELDS}}
                         },
@@ -27,6 +29,8 @@ def digest(snapshot: Snapshot) -> str:
                 },
             }
         )
+    elif snapshot.schema_version == "1.2":
+        payload = snapshot.model_dump_json(exclude={"instances": {"__all__": adjacent}})
     else:
         payload = snapshot.model_dump_json()
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()

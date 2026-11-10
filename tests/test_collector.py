@@ -62,6 +62,10 @@ def service(identifier=ID, sku="Premium"):
 def exercise(handler, config):
     def route(request):
         path = request.url.path
+        if path.endswith("/pricings/Api"):
+            return httpx.Response(200, json={"properties": {"pricingTier": "Free"}})
+        if path.endswith("/autoscalesettings"):
+            return httpx.Response(200, json={"value": []})
         tail = path.partition("/service/")[2]
         if tail and "/" in tail and not path.endswith("/metrics"):
             if path.endswith(("/tenant/access", "/portalsettings/signup")):
@@ -143,7 +147,9 @@ def test_collection_projects_safe_metadata_and_queries_only_gets():
         ).url.params["aggregation"]
         == "Total"
     )
-    assert {warning.code for warning in snapshot.collection_warnings} == {"PARTIAL_METRIC_DATA"}
+    assert {
+        warning.code for warning in snapshot.collection_warnings if warning.module == "metrics"
+    } == {"PARTIAL_METRIC_DATA"}
 
 
 def test_v2_does_not_query_zero_returning_classic_metric():
@@ -161,7 +167,11 @@ def test_v2_does_not_query_zero_returning_classic_metric():
     assert next(
         item for item in snapshot.instances[0].metrics if item.name == "Capacity"
     ).status == ("unsupported")
-    assert all(warning.code == "NO_METRIC_DATA" for warning in snapshot.collection_warnings)
+    assert all(
+        warning.code == "NO_METRIC_DATA"
+        for warning in snapshot.collection_warnings
+        if warning.module == "metrics"
+    )
 
 
 def test_permission_failure_is_preserved_without_response_body():
@@ -205,9 +215,9 @@ def test_duplicate_metric_samples_become_structured_warnings():
         handler, AssessmentConfig.model_validate({"targets": {"instances": [{"resource_id": ID}]}})
     )
     assert snapshot.instances[0].core_status == "available"
-    assert {warning.code for warning in snapshot.collection_warnings} == {
-        "DUPLICATE_METRIC_TIMESTAMPS"
-    }
+    assert {
+        warning.code for warning in snapshot.collection_warnings if warning.module == "metrics"
+    } == {"DUPLICATE_METRIC_TIMESTAMPS"}
     assert SECRET not in snapshot.model_dump_json()
 
 
@@ -236,7 +246,11 @@ def test_discovery_pagination_deduplication_and_explicit_targets():
     assert len(snapshot.instances) == 2
     assert discovered_paths.count(first_path) == 2
     assert all(instance.core_status == "available" for instance in snapshot.instances)
-    assert all(warning.code == "DISABLED" for warning in snapshot.collection_warnings)
+    assert all(
+        warning.code == "DISABLED"
+        for warning in snapshot.collection_warnings
+        if warning.module in {"discovery", "core", "metrics"}
+    )
 
 
 def test_pagination_cannot_send_tokens_to_another_host():

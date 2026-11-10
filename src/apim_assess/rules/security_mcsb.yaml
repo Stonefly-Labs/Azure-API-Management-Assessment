@@ -1,18 +1,19 @@
 - id: APIM-SEC-006
-  title: Explicit legacy TLS or SSL protocol flag is enabled
+  title: Legacy TLS configuration or logged TLS 1.0/1.1 traffic is observed
   pillar: SEC
   mcsb_controls: [DP-3]
   severity: Critical
   non_prod_severity: High
   evaluator: weak_tls
-  applicability: Explicit client/backend customProperties flags only; workspace/self-hosted negotiation and runtime traffic are not assessed.
-  required_signals: [customProperties legacy protocol flags]
-  description: Fail an explicit legacy enablement flag; missing flags are unknown. Retirement notices do not prove the observed service negotiated a protocol.
+  applicability: Explicit client/backend customProperties and optional aggregate managed-gateway logs. Workspace/self-hosted negotiation and unlogged callers are not assessed.
+  required_signals: [customProperties legacy protocol flags, optional linked-workspace TLS aggregates]
+  description: Fail an explicit legacy enablement flag or positive logged TLS 1.0/1.1 evidence. Disabled flags cannot override runtime observations. Missing flags stay unknown; no observed legacy traffic does not establish a population-wide runtime pass.
   business_impact: Legacy TLS dependencies can weaken transport security and cause retirement-related connection failures.
   remediation: Transition clients and backends to TLS 1.2 or later; review supported configuration and independently verify negotiated protocols.
   references:
     - https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-manage-protocols-ciphers
     - https://learn.microsoft.com/en-us/azure/api-management/breaking-changes/tls-versions-retirement-oct-2025
+    - https://learn.microsoft.com/en-us/azure/azure-monitor/reference/tables/apimanagementgatewaylogs
 - id: APIM-SEC-007
   title: Explicit configurable 3DES or CBC cipher flag is enabled
   pillar: SEC

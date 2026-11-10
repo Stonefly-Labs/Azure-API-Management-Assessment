@@ -67,6 +67,9 @@ class Thresholds(Model):
     app_insights_max_sampling_pct: float = Field(default=50.0, ge=0, le=100)
     diagnostic_body_bytes: int = Field(default=1024, ge=0, le=8192)
     payload_max_bytes: int = Field(default=102400, ge=1, le=4194304)
+    backend_latency_ms: float = Field(default=2000, gt=0, le=300000)
+    gateway_error_pct: float = Field(default=1, ge=0, le=100)
+    policy_max_age_days: int = Field(default=2, ge=1, le=30)
 
 
 class Waiver(Model):
@@ -112,7 +115,7 @@ class McsbCoverage(Model):
 
 
 class PortfolioAssessment(Model):
-    schema_version: Literal["1.0", "1.1", "1.2"] = "1.2"
+    schema_version: Literal["1.0", "1.1", "1.2", "1.3"] = "1.3"
     snapshot_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
     findings: list[Finding]
     pillar_scores: list[PillarScore]
@@ -125,7 +128,7 @@ class PortfolioAssessment(Model):
     def consistent_version(self) -> "PortfolioAssessment":
         if self.schema_version == "1.0" and self.policy_coverage:
             raise ValueError("Policy coverage requires findings schema 1.1")
-        if self.schema_version != "1.2" and (
+        if self.schema_version in {"1.0", "1.1"} and (
             self.rule_settings != RuleSettings()
             or self.mcsb_coverage
             or self.mcsb_assessed_score is not None

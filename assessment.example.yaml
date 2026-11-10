@@ -1,4 +1,4 @@
-# Only implemented options are accepted; adjacent and upstream collectors remain deferred.
+# Only implemented options are accepted; upstream WAF and AI remain deferred.
 env: auto
 targets:
   instances:
@@ -9,8 +9,15 @@ targets:
   resource_groups: []
 modules:
   metrics: true
+  networking: true
+  defender_policy: true
+  # Opt-in: read aggregate logs only from enabled GatewayLogs diagnostic workspaces.
+  # Requires defender_policy=true for diagnostic linkage; never discovers arbitrary workspaces.
+  log_analytics_kql: false
 telemetry:
   lookback_days: 14
+  kql_max_rows: 5  # Maximum hashed API hotspot rows per workspace/table.
+  kql_timeout_seconds: 30
 rules:
   # Waivers retain original outcomes/evidence, but are excluded from scoring.
   # A resource_id is optional; a matching resource waiver overrides a global one.
@@ -26,3 +33,6 @@ rules:
     app_insights_max_sampling_pct: 50
     diagnostic_body_bytes: 1024
     payload_max_bytes: 102400
+    backend_latency_ms: 2000
+    gateway_error_pct: 1
+    policy_max_age_days: 2

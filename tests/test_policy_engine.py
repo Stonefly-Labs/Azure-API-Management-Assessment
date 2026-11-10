@@ -269,7 +269,7 @@ def test_product_controls_are_not_union_applied_to_api_subscription_context(poli
     assert len(assessment.policy_coverage) == 2
     assert {row.jwt for row in assessment.policy_coverage} == {"present", "absent"}
     assert outcomes(policy_snapshot)["APIM-SEC-018"] == "fail"
-    assert len(assessment.findings) == 40  # Contexts do not inflate scores.
+    assert len(assessment.findings) == 47  # Contexts do not inflate scores.
 
 
 def test_open_product_creates_anonymous_context_even_when_api_requires_key(policy_snapshot):
@@ -559,7 +559,17 @@ def test_inherited_backend_reference_keeps_its_declaring_namespace(policy_snapsh
 def test_legacy_digest_and_findings_still_render_without_reinterpreting_scores(snapshot):
     # Schema 1.0 serialized instances predate inventory. Their exact hash contract is retained.
     legacy_json = snapshot.model_dump_json(
-        exclude={"instances": {"__all__": {"inventory", "service_settings"}}}
+        exclude={
+            "instances": {
+                "__all__": {
+                    "inventory",
+                    "service_settings",
+                    "networking",
+                    "governance",
+                    "log_analytics",
+                }
+            }
+        }
     )
     expected = hashlib.sha256(legacy_json.encode()).hexdigest()
     assert digest(snapshot) == expected
