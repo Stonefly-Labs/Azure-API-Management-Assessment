@@ -77,5 +77,5 @@ def test_inconsistent_scores_are_rejected(snapshot):
 def test_missing_rule_results_are_not_reported_as_coverage(snapshot):
     assessment = analyze(snapshot)
     assessment.findings.pop()
-    with pytest.raises(ValueError, match="every seed rule"):
+    with pytest.raises(ValueError, match="every catalog rule"):
         render(snapshot, assessment)

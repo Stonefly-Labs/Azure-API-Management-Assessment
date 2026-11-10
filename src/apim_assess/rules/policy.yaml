@@ -1,0 +1,95 @@
+- id: APIM-SEC-019
+  title: Policy scope omits base inheritance
+  pillar: SEC
+  severity: Critical
+  non_prod_severity: Advisory
+  applicability: HTTP and SOAP API execution contexts, including workspace and product scopes.
+  required_signals: [apis, operations, products, workspaces, effective_policy]
+  description: Explicit child policy sections without a direct base element discard broader policy sections.
+  business_impact: An intentional or accidental override can bypass centrally configured security controls.
+  remediation: Restore a direct base element in each child section at the intended execution position; review intentional replacements.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-policies
+    - https://learn.microsoft.com/en-us/azure/api-management/policy-fragments
+  evaluator: policy_inheritance
+
+- id: APIM-SEC-017
+  title: API permits anonymous access without a caller validation policy
+  pillar: SEC
+  mcsb_controls: [IM-1]
+  severity: Critical
+  non_prod_severity: Advisory
+  applicability: HTTP and SOAP contexts with subscriptionRequired explicitly false on the API or an open product; configuration evidence only.
+  required_signals: [apis.subscriptionRequired, effective_policy.inbound]
+  description: Check for a configured, unconditional JWT, Entra token or client-certificate validator on APIs that do not require subscription keys. Portal OAuth settings alone are not runtime validation.
+  business_impact: Unauthenticated callers may reach API functionality. Deliberately public APIs require an explicit design review.
+  remediation: Configure validate-jwt, validate-azure-ad-token or validate-client-certificate with appropriate claims and trust settings before processing requests.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/validate-jwt-policy
+    - https://learn.microsoft.com/en-us/azure/api-management/validate-azure-ad-token-policy
+    - https://learn.microsoft.com/en-us/azure/api-management/validate-client-certificate-policy
+    - https://learn.microsoft.com/en-us/security/benchmark/azure/baselines/api-management-security-baseline
+  evaluator: anonymous_access
+
+- id: APIM-SEC-018
+  title: Subscription-key API lacks caller token validation
+  pillar: SEC
+  mcsb_controls: [IM-1]
+  severity: Medium
+  non_prod_severity: Low
+  applicability: HTTP and SOAP APIs with subscriptionRequired explicitly true; certificate-authenticated contexts are not applicable.
+  required_signals: [apis.subscriptionRequired, effective_policy.inbound]
+  description: Subscription keys identify subscriptions, not individual caller identities. Check for effective JWT or Entra validation, not developer-portal OAuth configuration.
+  business_impact: Shared keys alone provide limited caller identity and authorization assurance.
+  remediation: Add JWT or Entra token validation with workload-appropriate audiences, issuers and claims, or document certificate-based authentication.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    - https://learn.microsoft.com/en-us/azure/api-management/validate-jwt-policy
+    - https://learn.microsoft.com/en-us/azure/api-management/validate-azure-ad-token-policy
+    - https://learn.microsoft.com/en-us/security/benchmark/azure/baselines/api-management-security-baseline
+  evaluator: subscription_jwt
+
+- id: APIM-COST-004
+  title: API lacks an effective rate or backend concurrency limit
+  pillar: COST
+  severity: High
+  non_prod_severity: Low
+  applicability: HTTP and SOAP execution contexts; rate-limit-by-key is unsupported on Consumption.
+  required_signals: [sku, apis.subscriptionRequired, effective_policy.inbound, effective_policy.backend]
+  description: Check for an unconditional positive rate limit or a positive concurrency limit enclosing backend forwarding. Expressions and conditional increments do not establish fixed limits.
+  business_impact: Unbounded demand can consume gateway and downstream capacity and increase costs.
+  remediation: Add rate-limit-by-key on a supported gateway, subscription rate-limit where keys are required, or limit-concurrency around forward-request. Size limits for the workload; counters are gateway-local.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/rate-limit-policy
+    - https://learn.microsoft.com/en-us/azure/api-management/rate-limit-by-key-policy
+    - https://learn.microsoft.com/en-us/azure/api-management/limit-concurrency-policy
+  evaluator: runaway_load
+
+- id: APIM-SEC-020
+  title: Effective CORS allows wildcard origins for protected APIs
+  pillar: SEC
+  severity: High
+  non_prod_severity: Low
+  applicability: First effective inbound CORS policy; no CORS is not applicable and explicit OPTIONS operations are unknown.
+  required_signals: [apis.subscriptionRequired, operations, effective_policy.inbound]
+  description: Flag a wildcard origin combined with credentials or configured caller protection. This is a configuration review, not proof of browser credential disclosure or an exploit.
+  business_impact: Broad cross-origin access can conflict with the intended browser-facing trust boundary.
+  remediation: Replace wildcard origins with the intended origin allowlist and review credential requirements and preflight behavior.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/cors-policy
+  evaluator: permissive_cors
+
+- id: APIM-OPS-002
+  title: API uses a literal backend URL instead of a backend entity
+  pillar: OPS
+  severity: Medium
+  non_prod_severity: Low
+  applicability: HTTP and SOAP execution contexts with a determinable effective backend route.
+  required_signals: [apis.serviceUrl, backends, effective_policy.inbound, effective_policy.backend]
+  description: Resolve routing order to distinguish a literal API or policy URL from a reference to a collected backend entity. Dynamic and named-value routes remain unknown.
+  business_impact: Duplicated endpoint configuration complicates changes and centralized resilience management.
+  remediation: Define an APIM backend entity and reference it with set-backend-service backend-id at the effective scope.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/set-backend-service-policy
+    - https://learn.microsoft.com/en-us/azure/api-management/backends
+  evaluator: backend_reference

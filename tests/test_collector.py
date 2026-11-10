@@ -60,8 +60,17 @@ def service(identifier=ID, sku="Premium"):
 
 
 def exercise(handler, config):
+    def route(request):
+        path = request.url.path
+        tail = path.partition("/service/")[2]
+        if tail and "/" in tail and not path.endswith("/metrics"):
+            if path.endswith("/policies/policy"):
+                return httpx.Response(404)
+            return httpx.Response(200, json={"value": []})
+        return handler(request)
+
     async def run():
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(route)) as client:
             return await collect(config, ArmReader(FakeCredential(), client))
 
     return asyncio.run(run())
@@ -252,7 +261,12 @@ def test_pagination_cannot_send_tokens_to_another_host():
 
 @pytest.mark.parametrize(
     "url",
-    ["https://attacker.invalid/subscriptions/x", "http://management.azure.com/subscriptions/x"],
+    [
+        "https://attacker.invalid/subscriptions/x",
+        "http://management.azure.com/subscriptions/x",
+        "https://user:password@management.azure.com/subscriptions/x",
+        "https://management.azure.com:8443/subscriptions/x",
+    ],
 )
 def test_reader_rejects_unsafe_urls_before_authentication(url):
     credential = FakeCredential()
@@ -284,3 +298,52 @@ def test_retries_are_bounded_and_do_not_expose_failures():
         asyncio.run(run())
     assert len(calls) == 3
     assert all(call.args[0] <= 5 for call in sleep.call_args_list)
+
+
+def test_default_https_port_in_same_origin_pagination_is_supported():
+    def handler(request):
+        if request.url.params.get("page") == "2":
+            return httpx.Response(200, json={"value": [2]})
+        return httpx.Response(
+            200,
+            json={
+                "value": [1],
+                "nextLink": "https://management.azure.com:443" + ID + "?page=2",
+            },
+        )
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return [item async for item in ArmReader(FakeCredential(), client).pages(ID, "test")]
+
+    assert asyncio.run(run()) == [1, 2]
+
+
+def test_concurrent_reads_share_cached_token_and_refresh_before_expiry():
+    authorizations = []
+
+    def handler(request):
+        authorizations.append(request.headers["authorization"])
+        return httpx.Response(200, json={})
+
+    async def run():
+        credential = AsyncMock()
+        credential.get_token.side_effect = [
+            AccessToken("first-test-token", 1000),
+            AccessToken("second-test-token", 2000),
+        ]
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            reader = ArmReader(credential, client)
+            with patch("apim_assess.collector.client.time.time", return_value=500):
+                await asyncio.gather(*(reader.get(ID) for _ in range(20)))
+            assert credential.get_token.await_count == 1
+            with patch("apim_assess.collector.client.time.time", return_value=870):
+                await reader.get(ID)
+            assert credential.get_token.await_count == 1
+            with patch("apim_assess.collector.client.time.time", return_value=880):
+                await reader.get(ID)
+            assert credential.get_token.await_count == 2
+
+    asyncio.run(run())
+    assert authorizations[:-1] == ["Bearer first-test-token"] * 21
+    assert authorizations[-1] == "Bearer second-test-token"

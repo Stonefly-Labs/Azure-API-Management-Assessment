@@ -1,0 +1,398 @@
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Literal
+
+from apim_assess.analyzer.policy_resolver import inventory_complete, walk
+from apim_assess.collector.sanitizer import (
+    DYNAMIC,
+    LITERAL_ORIGIN,
+    LITERAL_URL,
+    REFERENCE,
+    reference_id,
+)
+from apim_assess.collector.telemetry import CLASSIC, V2
+from apim_assess.models.findings import Evaluation, Evidence, Outcome
+from apim_assess.models.policy import (
+    ControlState,
+    EffectivePolicy,
+    PolicyCoverage,
+    PolicyNode,
+)
+from apim_assess.models.snapshot import Instance
+
+Check = Literal["authentication", "jwt", "rate_limit", "inheritance", "cors", "backend"]
+BINDINGS: dict[str, Check] = {
+    "policy_inheritance": "inheritance",
+    "anonymous_access": "authentication",
+    "subscription_jwt": "jwt",
+    "runaway_load": "rate_limit",
+    "permissive_cors": "cors",
+    "backend_reference": "backend",
+}
+OPAQUE = {
+    "unresolved-policy",
+    "unrecognized-policy",
+    "retry",
+    "send-request",
+    "send-one-way-request",
+    "ip-filter",
+    "check-header",
+}
+
+
+def _positive(value: str | None, maximum: int | None = None) -> bool:
+    return bool(
+        value and value.isdigit() and int(value) > 0 and (maximum is None or int(value) <= maximum)
+    )
+
+
+def _validator(node: PolicyNode, *, certificate: bool = False) -> bool | None:
+    attrs = node.attributes
+    if node.tag == "validate-client-certificate":
+        if attrs.get("ignore-error", "false") == "true":
+            return False
+        return (
+            True
+            if all(
+                attrs.get(key, "true") == "true"
+                for key in ("validate-trust", "validate-not-before", "validate-not-after")
+            )
+            else None
+        )
+    if certificate:
+        return False
+    if node.tag == "validate-azure-ad-token":
+        return True if attrs.get("tenant-id") not in {None, "", DYNAMIC, REFERENCE} else None
+    if node.tag != "validate-jwt":
+        return False
+    source = attrs.get("header-name") or attrs.get("query-parameter-name")
+    signed = attrs.get("require-signed-tokens", "true") == "true"
+    expiry = attrs.get("require-expiration-time", "true") == "true"
+    keys = any(
+        child.tag == "openid-config"
+        and child.attributes.get("url") == LITERAL_URL
+        or child.tag == "issuer-signing-keys"
+        and bool(child.children)
+        for child in node.children
+    )
+    return True if source and signed and expiry and keys else None
+
+
+def _guaranteed(
+    nodes: list[PolicyNode], predicate: Callable[[PolicyNode], bool | None]
+) -> ControlState:
+    def run(
+        sequence: list[PolicyNode], states: list[tuple[ControlState, bool]]
+    ) -> list[tuple[ControlState, bool]]:
+        for node in sequence:
+            updated: list[tuple[ControlState, bool]] = []
+            for state, stopped in states:
+                if stopped:
+                    updated.append((state, True))
+                elif node.tag == "choose":
+                    branches = [
+                        child for child in node.children if child.tag in {"when", "otherwise"}
+                    ]
+                    if not branches or any(
+                        child.tag not in {"when", "otherwise"} for child in node.children
+                    ):
+                        updated.append(("unknown" if state != "present" else state, False))
+                    else:
+                        for branch in branches:
+                            updated.extend(run(branch.children, [(state, False)]))
+                        if not any(branch.tag == "otherwise" for branch in branches):
+                            updated.append((state, False))
+                elif node.tag == "return-response":
+                    updated.append((state, True))
+                else:
+                    found = predicate(node)
+                    if state != "present":
+                        if node.tag in OPAQUE or found is None:
+                            state = "unknown"
+                        elif found and state != "unknown":
+                            state = "present"
+                    if node.tag == "limit-concurrency":
+                        updated.extend(run(node.children, [(state, False)]))
+                    else:
+                        updated.append((state, node.tag == "forward-request"))
+            # Only six abstract states exist, regardless of the number of choose branches.
+            states = list(dict.fromkeys(updated))
+        return states
+
+    states = {state for state, _ in run(nodes, [("absent", False)])}
+    return states.pop() if len(states) == 1 else "unknown"
+
+
+def _identity(view: EffectivePolicy, *, certificate: bool = False) -> ControlState:
+    return _guaranteed(
+        view.sections["inbound"],
+        lambda node: _validator(node, certificate=certificate),
+    )
+
+
+def _jwt(view: EffectivePolicy) -> ControlState:
+    return _guaranteed(
+        view.sections["inbound"],
+        lambda node: False if node.tag == "validate-client-certificate" else _validator(node),
+    )
+
+
+def _rate(instance: Instance, view: EffectivePolicy) -> ControlState:
+    def predicate(node: PolicyNode) -> bool | None:
+        attrs = node.attributes
+        if node.tag == "limit-concurrency":
+            return (
+                True
+                if _positive(attrs.get("max-count"))
+                and node.section == "backend"
+                and attrs.get("key")
+                and any(child.tag == "forward-request" for child in node.children)
+                else None
+            )
+        if node.tag not in {"rate-limit", "rate-limit-by-key"}:
+            return False
+        if node.section != "inbound":
+            return None
+        if node.tag == "rate-limit-by-key" and (
+            instance.sku is None or instance.sku.name not in CLASSIC | V2
+        ):
+            return None
+        if node.tag == "rate-limit":
+            if view.subscription_required is not True:
+                return None
+            if not any(part in node.scope.split("/") for part in ("apis", "products")):
+                return None
+        if not (_positive(attrs.get("calls")) and _positive(attrs.get("renewal-period"), 300)):
+            return None
+        if node.tag == "rate-limit-by-key" and not attrs.get("counter-key"):
+            return None
+        if attrs.get("increment-condition") or attrs.get("increment-count", "1") != "1":
+            return None
+        return True
+
+    return _guaranteed(view.sections["inbound"] + view.sections["backend"], predicate)
+
+
+def _cors(view: EffectivePolicy) -> ControlState:
+    def first(nodes: list[PolicyNode]) -> list[PolicyNode | None]:
+        possibilities: list[PolicyNode | None] = [None]
+        for node in nodes:
+            if None not in possibilities:
+                break
+            if node.tag == "cors":
+                possibilities = [candidate for candidate in possibilities if candidate is not None]
+                possibilities.append(node)
+            elif node.tag == "choose":
+                branches = [child for child in node.children if child.tag in {"when", "otherwise"}]
+                possibilities = [candidate for candidate in possibilities if candidate is not None]
+                for branch in branches:
+                    possibilities.extend(first(branch.children))
+                if not any(branch.tag == "otherwise" for branch in branches):
+                    possibilities.append(None)
+            elif node.tag in OPAQUE or node.tag in {"return-response", "forward-request"}:
+                possibilities = [candidate for candidate in possibilities if candidate is not None]
+                possibilities.append(PolicyNode(tag="unresolved-policy", source=node.source))
+        return possibilities
+
+    outcomes: set[ControlState] = set()
+    for node in first(view.sections["inbound"]):
+        if node is None:
+            outcomes.add("not_applicable")
+            continue
+        if node.tag != "cors":
+            outcomes.add("unknown")
+            continue
+        origins = [
+            origin
+            for child in node.children
+            if child.tag == "allowed-origins"
+            for origin in child.children
+            if origin.tag == "origin"
+        ]
+        if not origins:
+            outcomes.add("unknown")
+        elif any(origin.text not in {"*", LITERAL_ORIGIN} for origin in origins):
+            outcomes.add("unknown")
+        elif any(origin.text == "*" for origin in origins):
+            credentials = node.attributes.get("allow-credentials", "false")
+            auth = _identity(view)
+            if credentials == "true" or view.subscription_required is True or auth == "present":
+                outcomes.add("absent")
+            elif credentials != "false" or view.subscription_required is None or auth == "unknown":
+                outcomes.add("unknown")
+            else:
+                outcomes.add("present")
+        else:
+            outcomes.add("present")
+    return outcomes.pop() if len(outcomes) == 1 else "unknown"
+
+
+def _backend(instance: Instance, view: EffectivePolicy) -> ControlState:
+    inventory = instance.inventory
+    if inventory is None:
+        return "unknown"
+    backends = {
+        (item.workspace, reference_id(item.name))
+        for item in inventory.resources
+        if item.kind == "backend"
+    }
+
+    def run(
+        nodes: list[PolicyNode], paths: list[tuple[ControlState, bool]]
+    ) -> list[tuple[ControlState, bool]]:
+        for node in nodes:
+            updated: list[tuple[ControlState, bool]] = []
+            for state, stopped in paths:
+                if stopped:
+                    updated.append((state, True))
+                elif node.tag == "set-backend-service":
+                    reference = node.attributes.get("backend-id")
+                    url = node.attributes.get("base-url")
+                    workspace = (
+                        "/".join(node.scope.split("/")[:2])
+                        if node.scope.startswith("workspaces/")
+                        else None
+                    )
+                    if reference and (workspace, reference) in backends:
+                        state = "present"
+                    elif url == LITERAL_URL:
+                        state = "absent"
+                    else:
+                        state = "unknown"
+                    updated.append((state, False))
+                elif node.tag == "choose":
+                    branches = [
+                        child for child in node.children if child.tag in {"when", "otherwise"}
+                    ]
+                    for branch in branches:
+                        updated.extend(run(branch.children, [(state, False)]))
+                    if not any(branch.tag == "otherwise" for branch in branches):
+                        updated.append((state, False))
+                elif node.tag == "limit-concurrency":
+                    updated.extend(run(node.children, [(state, False)]))
+                elif node.tag in OPAQUE:
+                    updated.extend([("unknown", True), (state, False)])
+                else:
+                    updated.append((state, node.tag in {"forward-request", "return-response"}))
+            paths = list(dict.fromkeys(updated))
+        return paths
+
+    initial: ControlState = "absent" if view.service_url_kind == "literal" else "unknown"
+    outcomes = {
+        state
+        for state, _ in run(view.sections["inbound"] + view.sections["backend"], [(initial, False)])
+    }
+    state = outcomes.pop() if len(outcomes) == 1 else "unknown"
+    return state
+
+
+def coverage(instance: Instance, view: EffectivePolicy) -> PolicyCoverage:
+    inheritance: ControlState = (
+        "absent" if view.missing_base else "unknown" if view.issues else "present"
+    )
+    if any(issue.startswith("Protocol ") for issue in view.issues):
+        inheritance = "unknown"
+    cors = _cors(view)
+    if instance.inventory is not None and any(
+        item.path == view.operation_path and item.metadata.method == "OPTIONS"
+        for item in instance.inventory.resources
+    ):
+        cors = "unknown"
+    return PolicyCoverage(
+        resource_id=instance.resource_id,
+        api_path=view.api_path,
+        operation_path=view.operation_path,
+        product_path=view.product_path,
+        subscription_required=view.subscription_required,
+        http_gateway_only=view.http_gateway_only,
+        authentication=_identity(view),
+        jwt=_jwt(view),
+        rate_limit=_rate(instance, view),
+        inheritance=inheritance,
+        cors=cors,
+        backend=_backend(instance, view),
+        issues=view.issues,
+    )
+
+
+def evaluate(
+    binding: str, instance: Instance, views: list[EffectivePolicy], rows: list[PolicyCoverage]
+) -> Evaluation:
+    check = BINDINGS[binding]
+    states: list[ControlState] = []
+    evidence: list[Evidence] = []
+    for view, row in zip(views, rows, strict=True):
+        state: ControlState = getattr(row, check)
+        if check == "authentication" and view.subscription_required is True:
+            state = "not_applicable"
+        elif check == "authentication" and view.subscription_required is None and state == "absent":
+            state = "unknown"
+        elif check == "jwt":
+            if (
+                view.subscription_required is False
+                or _identity(view, certificate=True) == "present"
+            ):
+                state = "not_applicable"
+            elif view.subscription_required is None:
+                state = "unknown"
+        states.append(state)
+        context = view.product_path or "non-product"
+        sources = sorted({node.source for nodes in view.sections.values() for node in walk(nodes)})
+        detail = (
+            f"{view.operation_path or view.api_path}; context={context}; "
+            f"subscription_required={view.subscription_required}; "
+            f"{check}={state}; sources={', '.join(sources) or 'no local policy'}"
+        )
+        if check == "inheritance" and view.missing_base:
+            detail += "; missing base: " + ", ".join(view.missing_base)
+        evidence.append(Evidence(source="effective_policy", detail=detail))
+    complete = inventory_complete(instance.inventory)
+    outcome: Outcome
+    if "absent" in states:
+        outcome = "fail"
+    elif not complete or "unknown" in states:
+        outcome = "unknown"
+    elif not states or all(state == "not_applicable" for state in states):
+        outcome = "not_applicable"
+    else:
+        outcome = "pass"
+    if (
+        outcome == "unknown"
+        and complete
+        and views
+        and all("Protocol outside HTTP policy coverage" in view.issues for view in views)
+    ):
+        return Evaluation(
+            outcome="unsupported",
+            summary="The collected protocols are outside HTTP/SOAP policy coverage.",
+            evidence=evidence,
+        )
+    if (
+        check == "rate_limit"
+        and outcome == "unknown"
+        and complete
+        and instance.sku is not None
+        and instance.sku.name == "Consumption"
+        and any(
+            node.tag == "rate-limit-by-key"
+            for view in views
+            for node in walk(view.sections["inbound"])
+        )
+    ):
+        outcome = "unsupported"
+    label = {
+        "pass": "All applicable collected execution contexts satisfy this configuration check.",
+        "fail": "A collected execution context does not satisfy this configuration check.",
+        "unknown": "Incomplete coverage or execution semantics; enforcement is not established.",
+        "not_applicable": "No applicable API execution contexts for this check.",
+        "unsupported": "Rate-limit-by-key is unsupported on the Consumption gateway.",
+    }[outcome]
+    if not complete:
+        evidence.append(
+            Evidence(
+                source="collection_coverage",
+                detail="API, operation, product membership or workspace inventory is incomplete.",
+            )
+        )
+    return Evaluation(outcome=outcome, summary=label, evidence=evidence)

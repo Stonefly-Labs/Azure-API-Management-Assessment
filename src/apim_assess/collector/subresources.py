@@ -1,0 +1,270 @@
+from __future__ import annotations
+
+import asyncio
+import re
+from typing import Literal
+from urllib.parse import quote
+
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+
+from apim_assess.collector.client import ArmReader, AzureReadError
+from apim_assess.collector.sanitizer import reference_id, sanitize_policy, value_kind
+from apim_assess.models.policy import (
+    CollectionCoverage,
+    Inventory,
+    PolicyDocument,
+    ResourceMetadata,
+    SubResource,
+)
+from apim_assess.models.snapshot import CollectionWarning
+
+VERSION = "2024-05-01"
+Kind = Literal[
+    "api",
+    "operation",
+    "product",
+    "subscription",
+    "backend",
+    "named_value",
+    "certificate",
+    "diagnostic",
+    "gateway",
+    "workspace",
+]
+COLLECTIONS: dict[str, Kind] = {
+    "apis": "api",
+    "products": "product",
+    "subscriptions": "subscription",
+    "backends": "backend",
+    "namedValues": "named_value",
+    "certificates": "certificate",
+    "diagnostics": "diagnostic",
+}
+
+
+class _Entity(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    properties: dict[str, object] = Field(default_factory=dict)
+
+
+def _object(value: object) -> dict[str, object]:
+    if value is None:
+        return {}
+    return TypeAdapter(dict[str, object]).validate_python(value)
+
+
+def _metadata(kind: Kind, props: dict[str, object]) -> ResourceMetadata:
+    projected: dict[str, object] = {}
+    if kind == "api":
+        authentication = _object(props.get("authenticationSettings"))
+        projected = {
+            "subscription_required": props.get("subscriptionRequired"),
+            "service_url_kind": value_kind(props.get("serviceUrl")),
+            "api_type": props.get("type", props.get("apiType")),
+            "protocols": props.get("protocols"),
+            "oauth_configured": bool(authentication.get("oAuth2") or authentication.get("openid")),
+        }
+    elif kind == "operation":
+        projected = {"method": props.get("method")}
+    elif kind == "named_value":
+        projected = {
+            "secret": props.get("secret"),
+            "key_vault": props.get("keyVault") is not None,
+        }
+    elif kind == "backend":
+        tls = _object(props.get("tls"))
+        projected = {
+            "service_url_kind": value_kind(props.get("url")),
+            "credentials_present": bool(props.get("credentials")),
+            "circuit_breaker_present": bool(props.get("circuitBreaker")),
+            "backend_pool": str(props.get("type", "")).lower() == "pool",
+            "validate_certificate_chain": tls.get("validateCertificateChain"),
+            "validate_certificate_name": tls.get("validateCertificateName"),
+        }
+    elif kind == "certificate":
+        projected = {"certificate_expiry": props.get("expirationDate")}
+    elif kind == "diagnostic":
+        projected = {"sampling_percentage": _object(props.get("sampling")).get("percentage")}
+    elif kind in {"product", "subscription"}:
+        projected = {"state": props.get("state")}
+        if kind == "product":
+            projected["subscription_required"] = props.get("subscriptionRequired")
+    return ResourceMetadata.model_validate(projected)
+
+
+class SubresourceCollector:
+    def __init__(
+        self, reader: ArmReader, identifier: str, warnings: list[CollectionWarning]
+    ) -> None:
+        self.reader = reader
+        self.identifier = identifier
+        self.warnings = warnings
+        self.inventory = Inventory()
+        self.semaphore = asyncio.Semaphore(8)
+
+    def warn(self, path: str, code: str, *, policy: bool = False) -> None:
+        self.warnings.append(
+            CollectionWarning(
+                module="policies" if policy else "subresources",
+                resource_id=self.identifier,
+                code=code,
+                message=(
+                    f"Collection incomplete at {path or 'global'}; dependent coverage is unknown."
+                ),
+            )
+        )
+
+    def url(self, path: str) -> str:
+        return quote(self.identifier + ("/" + path if path else ""), safe="/")
+
+    async def listing(self, path: str) -> list[_Entity]:
+        result: list[_Entity] = []
+        seen: set[str] = set()
+        status: Literal["complete", "partial", "unavailable"] = "complete"
+        try:
+            async with self.semaphore:
+                async for raw in self.reader.pages(self.url(path), VERSION):
+                    entity = _Entity.model_validate(raw)
+                    prefix = self.identifier + "/" + path + "/"
+                    if path.endswith("/apis") and "/products/" in "/" + path:
+                        canonical = self.identifier + "/" + path.split("products/")[0] + "apis/"
+                        if entity.id.casefold().startswith(prefix.casefold()):
+                            entity.id = canonical + entity.id[len(prefix) :]
+                        prefix = canonical
+                    name = entity.id[len(prefix) :]
+                    if (
+                        not entity.id.casefold().startswith(prefix.casefold())
+                        or not re.fullmatch(r"[^/\\?#%\x00-\x1f]+", name)
+                        or name in {".", ".."}
+                        or entity.id.casefold() in seen
+                    ):
+                        raise AzureReadError("INVALID_RESOURCE_ID")
+                    seen.add(entity.id.casefold())
+                    result.append(entity.model_copy(update={"id": prefix + name}))
+        except (AzureReadError, ValidationError) as exc:
+            status = "partial" if result else "unavailable"
+            self.warn(path, str(exc) if isinstance(exc, AzureReadError) else "INVALID_RESPONSE")
+        self.inventory.collections[path] = CollectionCoverage(status=status, count=len(result))
+        return result
+
+    def project(self, entity: _Entity, kind: Kind, workspace: str | None) -> SubResource | None:
+        path = entity.id[len(self.identifier) + 1 :]
+        try:
+            item = SubResource(
+                resource_id=entity.id,
+                path=path,
+                name=path.rsplit("/", 1)[-1],
+                kind=kind,
+                workspace=workspace,
+                metadata=_metadata(kind, entity.properties),
+            )
+        except (ValidationError, ValueError):
+            self.inventory.collections[path.rsplit("/", 1)[0]].status = "partial"
+            self.warn(path, "INVALID_METADATA")
+            return None
+        self.inventory.resources.append(item)
+        if (
+            kind == "api"
+            and (
+                item.metadata.subscription_required is None
+                or item.metadata.api_type is None
+                and not item.metadata.protocols
+            )
+            or kind == "product"
+            and item.metadata.subscription_required is None
+            or kind == "operation"
+            and item.metadata.method is None
+        ):
+            self.warn(path, "INCOMPLETE_METADATA")
+        return item
+
+    async def policy(self, scope: str, *, fragment: bool = False) -> None:
+        path = scope if fragment else (scope + "/" if scope else "") + "policies/policy"
+        source = self.identifier + "/" + path
+        try:
+            async with self.semaphore:
+                raw = await self.reader.get(
+                    self.url(path),
+                    {"api-version": VERSION, "format": "xml"},
+                    policy_xml=True,
+                )
+            if isinstance(raw, str):
+                xml = raw
+            else:
+                body = _object(raw)
+                props = _object(body.get("properties"))
+                value = props.get("value")
+                if not isinstance(value, str) or props.get("format", "rawxml") not in {
+                    "rawxml",
+                    "xml",
+                }:
+                    raise AzureReadError("INVALID_POLICY_RESPONSE")
+                xml = value
+            document = sanitize_policy(source, xml, fragment=fragment)
+            if document.status == "unavailable":
+                self.warn(path, document.error_code or "INVALID_XML", policy=True)
+        except (AzureReadError, ValidationError) as exc:
+            code = str(exc) if isinstance(exc, AzureReadError) else "INVALID_RESPONSE"
+            if code == "HTTP_404" and not fragment:
+                document = PolicyDocument(source=source, status="absent")
+            else:
+                document = PolicyDocument(source=source, status="unavailable", error_code=code)
+                self.warn(path, code, policy=True)
+        if fragment:
+            parent, name = scope.rsplit("/", 1)
+            self.inventory.fragments[parent + "/" + reference_id(name)] = document
+        else:
+            self.inventory.policies[scope] = document
+
+    async def api(self, item: SubResource) -> None:
+        operations_path = item.path + "/operations"
+        operations = await self.listing(operations_path)
+        await self.policy(item.path)
+        projected = [
+            self.project(operation, "operation", item.workspace) for operation in operations
+        ]
+        await asyncio.gather(
+            *(self.policy(operation.path) for operation in projected if operation is not None)
+        )
+        diagnostics_path = item.path + "/diagnostics"
+        for diagnostic in await self.listing(diagnostics_path):
+            self.project(diagnostic, "diagnostic", item.workspace)
+
+    async def scope(self, workspace: str | None = None) -> None:
+        prefix = workspace + "/" if workspace else ""
+        await self.policy(workspace or "")
+        apis: list[SubResource] = []
+        for collection, kind in COLLECTIONS.items():
+            path = prefix + collection
+            for entity in await self.listing(path):
+                item = self.project(entity, kind, workspace)
+                if item is None:
+                    continue
+                if kind == "api":
+                    apis.append(item)
+                elif kind == "product":
+                    membership = item.path + "/apis"
+                    self.inventory.product_apis[item.path] = [
+                        api.id[len(self.identifier) + 1 :] for api in await self.listing(membership)
+                    ]
+                    await self.policy(item.path)
+        for entity in await self.listing(prefix + "policyFragments"):
+            await self.policy(entity.id[len(self.identifier) + 1 :], fragment=True)
+        await asyncio.gather(*(self.api(api) for api in apis))
+
+    async def collect(self) -> Inventory:
+        await self.scope()
+        for entity in await self.listing("gateways"):
+            self.project(entity, "gateway", None)
+        workspaces = await self.listing("workspaces")
+        for entity in workspaces:
+            workspace = self.project(entity, "workspace", None)
+            if workspace is not None:
+                await self.scope(workspace.path)
+        self.inventory.resources.sort(key=lambda item: item.path.casefold())
+        self.inventory.collections = dict(sorted(self.inventory.collections.items()))
+        self.inventory.policies = dict(sorted(self.inventory.policies.items()))
+        self.inventory.fragments = dict(sorted(self.inventory.fragments.items()))
+        self.inventory.product_apis = dict(sorted(self.inventory.product_apis.items()))
+        return self.inventory

@@ -19,8 +19,14 @@ def test_seed_catalog_and_multi_instance_dispatch(snapshot: Snapshot) -> None:
         "APIM-SEC-001",
         "APIM-COST-001",
         "APIM-PERF-001",
+        "APIM-SEC-017",
+        "APIM-SEC-018",
+        "APIM-SEC-019",
+        "APIM-SEC-020",
+        "APIM-COST-004",
+        "APIM-OPS-002",
     }
-    assert len(assessment.findings) == 15
+    assert len(assessment.findings) == 33
     assert {item.resource_id for item in assessment.findings} == {
         instance.resource_id for instance in snapshot.instances
     }

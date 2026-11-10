@@ -4,9 +4,12 @@ from urllib.parse import urlsplit
 
 from jinja2 import Environment, StrictUndefined
 
-from apim_assess.analyzer.engine import load_rules, scores
+from apim_assess.analyzer.engine import EVALUATORS, load_rules, scores
+from apim_assess.analyzer.evaluators.policy import coverage
+from apim_assess.analyzer.policy_resolver import resolve
 from apim_assess.artifacts import digest
 from apim_assess.models.findings import Finding, PillarScore, PortfolioAssessment
+from apim_assess.models.policy import PolicyCoverage
 from apim_assess.models.snapshot import Instance, Snapshot
 
 
@@ -16,6 +19,7 @@ class ReportScope(TypedDict):
     instances: list[Instance]
     findings: list[Finding]
     scores: list[PillarScore]
+    policy_coverage: list[PolicyCoverage]
 
 
 def metric_summary(instance: Instance) -> list[dict[str, str]]:
@@ -48,9 +52,18 @@ def render(snapshot: Snapshot, assessment: PortfolioAssessment) -> str:
         identifier not in identities for identifier, _ in pairs
     ):
         raise ValueError("Findings contain duplicate or out-of-scope resources.")
-    expected = {(identifier, rule.id) for identifier in identities for rule in load_rules()}
+    rules = [
+        rule
+        for rule in load_rules()
+        if assessment.schema_version != "1.0" or rule.evaluator in EVALUATORS
+    ]
+    expected = {(identifier, rule.id) for identifier in identities for rule in rules}
     if set(pairs) != expected:
-        raise ValueError("Findings must contain every seed rule for every snapshot instance.")
+        raise ValueError("Findings must contain every catalog rule for every snapshot instance.")
+    if assessment.schema_version != "1.0" and assessment.policy_coverage != [
+        coverage(instance, view) for instance in snapshot.instances for view in resolve(instance)
+    ]:
+        raise ValueError("Policy coverage does not match the snapshot.")
     if any(
         finding.environment != identities[finding.resource_id].environment
         for finding in assessment.findings
@@ -70,6 +83,7 @@ def render(snapshot: Snapshot, assessment: PortfolioAssessment) -> str:
             "instances": snapshot.instances,
             "findings": assessment.findings,
             "scores": assessment.pillar_scores,
+            "policy_coverage": assessment.policy_coverage,
         }
     ]
     for instance in snapshot.instances:
@@ -85,10 +99,18 @@ def render(snapshot: Snapshot, assessment: PortfolioAssessment) -> str:
                 "instances": [instance],
                 "findings": selected,
                 "scores": scores(selected),
+                "policy_coverage": [
+                    row
+                    for row in assessment.policy_coverage
+                    if row.resource_id == instance.resource_id
+                ],
             }
         )
     environment = Environment(autoescape=True, undefined=StrictUndefined)
     template = files("apim_assess").joinpath("reporting", "templates", "report_deck.html.j2")
     return environment.from_string(template.read_text(encoding="utf-8")).render(
-        snapshot=snapshot, scopes=scopes, metric_summary=metric_summary
+        snapshot=snapshot,
+        scopes=scopes,
+        metric_summary=metric_summary,
+        legacy=assessment.schema_version == "1.0",
     )

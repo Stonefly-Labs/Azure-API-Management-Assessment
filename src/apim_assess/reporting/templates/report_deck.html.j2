@@ -114,7 +114,7 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
 </head>
 <body>
 <header>
-  <strong>apim-assess / steel thread</strong>
+  <strong>apim-assess / assessment</strong>
   <label for="scope-select">Scope</label>
   <select id="scope-select">
     {% for scope in scopes %}<option value="{{ loop.index0 }}">{{ scope.title }}</option>{% endfor %}
@@ -126,13 +126,14 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
 {% for scope in scopes %}
 <div class="scope" id="scope-{{ loop.index0 }}">
   <section class="slide">
-    <p class="eyebrow">Iteration 1 / assessment scope</p>
+    <p class="eyebrow">Iteration {{ "1" if legacy else "2" }} / assessment scope</p>
     <h1>API Management<br>{{ scope.title }} readout</h1>
     <p>{{ scope.instances | length }} instance(s) / collected {{ snapshot.collected_at.isoformat() }}</p>
     <p class="muted">Telemetry: {{ snapshot.telemetry_start.isoformat() }} to {{ snapshot.telemetry_end.isoformat() }} (UTC)</p>
-    <div class="notice">Five seed rules only. This is not a full five-pillar or MCSB compliance assessment.
-      Unknown and unsupported signals are never treated as passes. Policy, adjacent-network,
-      upstream WAF and AI gateway analysis are outside this iteration.</div>
+    <div class="notice">{% if legacy %}Legacy findings: five service rules, no policy assessment.
+      {% else %}Five service rules and six policy rules.{% endif %} Not a complete MCSB compliance assessment.
+      Unknown and unsupported signals are never treated as passes. Policy results assess configuration,
+      not runtime enforcement. Adjacent-network, upstream WAF and AI gateway analysis remain outside scope.</div>
     {% for instance in scope.instances %}
     <article>
       <h3>{{ instance.name }}</h3>
@@ -163,7 +164,50 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
     <p>Scores use severity-weighted passes divided by known pass/fail results only.
       Critical=5, High=4, Medium=3, Low=2, Advisory=1. Portfolio scores weight individual
       results, not instance averages. Coverage counts above must accompany every score.</p>
-    <p class="muted">OPS has no seed rule. No overall MCSB compliance or policy coverage score is claimed.</p>
+    <p class="muted">Each rule contributes once per instance, not once per operation.
+      The policy matrix shows context coverage separately. No overall MCSB compliance score is claimed.</p>
+  </section>
+  <section class="slide">
+    <p class="eyebrow">Effective policy coverage / {{ scope.title }}</p>
+    <h2>API &amp; operation execution contexts</h2>
+    <p>Product policies are evaluated separately from non-product subscription and no-subscription requests.
+      The first effective CORS policy is used. Conditional, unavailable and unsupported evidence stays unknown.</p>
+    <p class="muted">Present = configured control satisfies the check; absent = check not satisfied.
+      Backend means backend-entity routing; CORS means the wildcard-origin check.
+      This does not verify token claims, reachability, browser behavior or runtime enforcement.</p>
+    {% for instance in scope.instances %}
+    <article>
+      <h3>{{ instance.name }}</h3>
+      {% if instance.inventory %}
+      <details><summary>Sub-resource collection coverage</summary>
+      {% for path, coverage in instance.inventory.collections.items() %}
+        <p><code>{{ path }}</code>: {{ coverage.status }} / {{ coverage.count }} observed</p>
+      {% endfor %}
+      </details>
+      {% else %}<p>Sub-resource inventory was not collected. Policy coverage is unknown.</p>{% endif %}
+    </article>
+    {% endfor %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>APIM / API / operation</th><th>Context</th><th>Inheritance</th><th>Caller authentication</th><th>JWT / Entra</th><th>Rate / concurrency</th><th>CORS</th><th>Backend entity</th></tr></thead>
+        <tbody>
+        {% for row in scope.policy_coverage %}
+        <tr>
+          <td><code>{{ row.resource_id }}</code><br><code>{{ row.operation_path or row.api_path }}</code>
+            {% if row.http_gateway_only %}<p>API type omitted: HTTP(S) gateway policies only; resolver-specific policies not assessed.</p>{% endif %}
+            {% for issue in row.issues %}<p>{{ issue }}</p>{% endfor %}</td>
+          <td>{{ row.product_path or "Non-product" }}<br>
+            {% if row.subscription_required is sameas true %}Subscription context
+            {% elif row.subscription_required is sameas false %}No subscription required
+            {% else %}Subscription requirement unknown{% endif %}
+          </td>
+          <td>{{ row.inheritance }}</td><td>{{ row.authentication }}</td><td>{{ row.jwt }}</td>
+          <td>{{ row.rate_limit }}</td><td>{{ row.cors }}</td><td>{{ row.backend }}</td>
+        </tr>
+        {% else %}<tr><td colspan="8">No collected API contexts. Check inventory coverage before interpreting this as an empty service.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
   </section>
   <section class="slide">
     <p class="eyebrow">Topology &amp; metrics / {{ scope.title }}</p>
@@ -231,6 +275,7 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
 (() => {
   const scopes = [...document.querySelectorAll(".scope")];
   const select = document.getElementById("scope-select");
+  const pageCount = scopes[0].querySelectorAll(".slide").length;
   let page = 0;
   function show() {
     scopes.forEach((scope, index) => {
@@ -239,11 +284,11 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
         slide.hidden = position !== page;
       });
     });
-    document.getElementById("position").textContent = `Slide ${page + 1} of 4`;
+    document.getElementById("position").textContent = `Slide ${page + 1} of ${pageCount}`;
     document.getElementById("previous").disabled = page === 0;
-    document.getElementById("next").disabled = page === 3;
+    document.getElementById("next").disabled = page === pageCount - 1;
   }
-  function move(delta) { page = Math.max(0, Math.min(3, page + delta)); show(); window.scrollTo(0, 0); }
+  function move(delta) { page = Math.max(0, Math.min(pageCount - 1, page + delta)); show(); window.scrollTo(0, 0); }
   async function fullscreen() {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
