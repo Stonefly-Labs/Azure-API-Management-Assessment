@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -81,11 +81,15 @@ async def collect_metrics(
         aggregation = "Total" if name == "Requests" else "Average"
         if name in {"CpuPercent_Gateway", "MemoryPercent_Gateway", "Duration"}:
             aggregation += ",Maximum"
+        # Monitor's query decoding can turn numeric UTC offsets into invalid intervals.
+        timespan = "/".join(
+            instant.astimezone(UTC).isoformat().replace("+00:00", "Z") for instant in (start, end)
+        )
         # Classic Capacity maximum is not supported outside Premium and is not a scaling signal.
         params = {
             "api-version": METRICS_API_VERSION,
             "metricnames": name,
-            "timespan": f"{start.isoformat()}/{end.isoformat()}",
+            "timespan": timespan,
             "interval": "PT1H",
             "aggregation": aggregation,
         }

@@ -77,6 +77,9 @@ def test_collection_projects_safe_metadata_and_queries_only_gets():
         assert request.headers["authorization"] == "Bearer synthetic-test-token"
         if request.url.path.endswith("/metrics"):
             name = request.url.params["metricnames"]
+            timespan = request.url.params["timespan"]
+            assert all(instant.endswith("Z") for instant in timespan.split("/"))
+            assert "+" not in timespan
             return httpx.Response(
                 200,
                 json={
