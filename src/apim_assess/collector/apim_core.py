@@ -13,8 +13,10 @@ from pydantic import AwareDatetime, BaseModel, Field, ValidationError
 
 from apim_assess.collector.client import ArmReader, AzureReadError
 from apim_assess.collector.discovery import APIM_API_VERSION, discover
+from apim_assess.collector.governance import collect_governance
+from apim_assess.collector.networking import collect_networking
 from apim_assess.collector.subresources import SubresourceCollector
-from apim_assess.collector.telemetry import collect_metrics
+from apim_assess.collector.telemetry import collect_logs, collect_metrics
 from apim_assess.config import AssessmentConfig
 from apim_assess.models.snapshot import (
     CollectionWarning,
@@ -237,10 +239,12 @@ async def _collect(config: AssessmentConfig, reader: ArmReader) -> Snapshot:
     async def one(identifier: str) -> Instance:
         async with semaphore:
             service: _Service | None = None
+            body: object = None
             try:
-                service = _Service.model_validate(
-                    await reader.get(quote(identifier, safe="/"), {"api-version": APIM_API_VERSION})
+                body = await reader.get(
+                    quote(identifier, safe="/"), {"api-version": APIM_API_VERSION}
                 )
+                service = _Service.model_validate(body)
                 if service.id.casefold() != identifier.casefold():
                     service = None
                     raise AzureReadError("RESOURCE_ID_MISMATCH")
@@ -289,6 +293,29 @@ async def _collect(config: AssessmentConfig, reader: ArmReader) -> Snapshot:
                         and instance.sku.name in {"Developer", "Basic", "Standard", "Premium"},
                         portal=instance.sku is not None and instance.sku.name != "Consumption",
                     )
+                instance.networking = await collect_networking(
+                    reader,
+                    instance,
+                    body,
+                    warnings,
+                    enabled=config.modules.networking,
+                )
+                instance.governance, links = await collect_governance(
+                    reader,
+                    instance,
+                    warnings,
+                    enabled=config.modules.defender_policy,
+                )
+                instance.log_analytics = await collect_logs(
+                    reader,
+                    instance,
+                    links,
+                    start,
+                    end,
+                    warnings,
+                    config.telemetry,
+                    enabled=config.modules.log_analytics_kql,
+                )
             return instance
 
     instances = await asyncio.gather(*(one(identifier) for identifier in identifiers))

@@ -4,6 +4,7 @@ from importlib.resources import files
 import yaml
 from pydantic import TypeAdapter
 
+from apim_assess.analyzer.evaluators.adjacent_checks import ADJACENT_CHECKS
 from apim_assess.analyzer.evaluators.checks import Context
 from apim_assess.analyzer.evaluators.cost import low_capacity
 from apim_assess.analyzer.evaluators.performance import saturation
@@ -44,7 +45,16 @@ ITERATION_2_IDS = SEED_IDS | {
     "APIM-COST-004",
     "APIM-OPS-002",
 }
-CATALOG_CHECKS = SERVICE_CHECKS | POLICY_CHECKS
+ITERATION_4_IDS = {
+    "APIM-SEC-003",
+    "APIM-SEC-025",
+    "APIM-REL-004",
+    "APIM-COST-003",
+    "APIM-OPS-001",
+    "APIM-OPS-005",
+    "APIM-PERF-005",
+}
+CATALOG_CHECKS = SERVICE_CHECKS | POLICY_CHECKS | ADJACENT_CHECKS
 
 
 def load_rules() -> list[Rule]:

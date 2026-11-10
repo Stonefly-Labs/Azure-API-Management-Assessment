@@ -15,6 +15,7 @@ from pydantic import (
     model_validator,
 )
 
+from apim_assess.models.adjacent import Governance, LogAnalytics, Networking
 from apim_assess.models.policy import CATALOG_METADATA_FIELDS, Inventory
 
 Environment = Literal["prod", "non-prod"]
@@ -62,7 +63,16 @@ Percent = Annotated[float, Field(ge=0)]
 
 
 class CollectionWarning(Model):
-    module: Literal["discovery", "core", "metrics", "subresources", "policies"]
+    module: Literal[
+        "discovery",
+        "core",
+        "metrics",
+        "subresources",
+        "policies",
+        "networking",
+        "governance",
+        "log_analytics",
+    ]
     resource_id: str
     code: str
     message: str
@@ -134,10 +144,13 @@ class Instance(Model):
     metrics: list[MetricSeries] = Field(default_factory=list)
     inventory: Inventory | None = None
     service_settings: ServiceSettings | None = None
+    networking: Networking | None = None
+    governance: Governance | None = None
+    log_analytics: LogAnalytics | None = None
 
 
 class Snapshot(Model):
-    schema_version: Literal["1.0", "1.1", "1.2"] = "1.2"
+    schema_version: Literal["1.0", "1.1", "1.2", "1.3"] = "1.3"
     collected_at: AwareDatetime
     telemetry_start: AwareDatetime
     telemetry_end: AwareDatetime
@@ -152,7 +165,12 @@ class Snapshot(Model):
         if len(set(ids)) != len(ids):
             raise ValueError("Duplicate APIM resource IDs")
         for instance in self.instances:
-            if self.schema_version != "1.2" and (
+            if self.schema_version != "1.3" and any(
+                value is not None
+                for value in (instance.networking, instance.governance, instance.log_analytics)
+            ):
+                raise ValueError("Adjacent signals require snapshot schema 1.3")
+            if self.schema_version in {"1.0", "1.1"} and (
                 instance.service_settings is not None
                 or instance.inventory is not None
                 and any(

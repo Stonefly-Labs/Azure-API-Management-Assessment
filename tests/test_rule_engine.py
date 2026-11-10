@@ -15,22 +15,15 @@ def test_seed_catalog_and_multi_instance_dispatch(snapshot: Snapshot) -> None:
     assessment = analyze(snapshot)
     ids = {rule.id for rule in load_rules()}
     assert ITERATION_2_IDS <= ids
-    assert len(ids) == 40
+    assert len(ids) == 47
     assert not ids & {
-        "APIM-REL-004",
         "APIM-REL-005",
         "APIM-SEC-002",
-        "APIM-SEC-003",
         "APIM-SEC-004",
         "APIM-SEC-005",
-        "APIM-SEC-025",
-        "APIM-COST-003",
-        "APIM-OPS-001",
-        "APIM-OPS-005",
         "APIM-OPS-006",
-        "APIM-PERF-005",
     }
-    assert len(assessment.findings) == 120
+    assert len(assessment.findings) == 141
     assert {item.resource_id for item in assessment.findings} == {
         instance.resource_id for instance in snapshot.instances
     }

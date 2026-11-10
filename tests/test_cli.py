@@ -38,7 +38,7 @@ def test_offline_stages_do_not_instantiate_azure_credentials(tmp_path, monkeypat
         ],
     )
     assert result.exit_code == 0, result.output
-    assert len(PortfolioAssessment.model_validate_json(findings.read_text()).findings) == 120
+    assert len(PortfolioAssessment.model_validate_json(findings.read_text()).findings) == 141
     assert "Portfolio readout" in report.read_text()
 
 
@@ -50,6 +50,9 @@ def test_assess_runs_real_mocked_collection_and_same_offline_stages(
 
     def handler(request):
         requests.append(request)
+        if request.url.path.endswith("/policyStates/latest/queryResults"):
+            assert request.method == "POST"
+            return httpx.Response(200, json={"value": []})
         assert request.method == "GET"
         if request.url.path.endswith("/metrics"):
             return httpx.Response(403, json={"error": {"message": "SECRET_RESPONSE_SENTINEL"}})

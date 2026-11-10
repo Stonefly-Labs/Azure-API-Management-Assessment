@@ -1,8 +1,9 @@
 # apim-assess
 
-Read-only Azure API Management assessment CLI. **Iterations 1-3**: core
+Read-only Azure API Management assessment CLI. **Iterations 1-4**: core
 configuration, Azure Monitor metrics, sanitized sub-resource inventory,
-effective XML policies, forty deterministic core rules, validated rule
+effective XML policies, 47 deterministic rules, linked networking/governance
+metadata, optional aggregate Log Analytics queries, validated rule
 waivers/thresholds, and a self-contained HTML deck and deep-dive explorer
 with effective policy and partial MCSB coverage matrices.
 
@@ -40,7 +41,9 @@ Repeat `--resource-id`, `--subscriptions`, or `--resource-groups` for multiple
 values. Explicit IDs and discovered services are combined case-insensitively.
 Resource-group filters apply to discovery, not explicit IDs. Discovery uses
 paginated ARM service list operations (the plan's ARM fallback), without a
-Resource Graph dependency. All Azure resource operations are HTTP GET.
+Resource Graph dependency. Azure resource reads are HTTP GET except the
+documented, read-only Policy Insights `latest/queryResults` POST. The reader
+does not expose a general resource-write operation.
 
 `--config assessment.example.yaml` accepts only implemented options.
 Explicit CLI lists replace their corresponding configured lists; omitted
@@ -147,6 +150,43 @@ Threshold equality does not fail utilization/sampling checks; certificate
 expiry at the warning boundary does fail. Saved settings make offline
 analysis replay deterministic.
 
+### Iteration 4: adjacent signals
+
+`modules.networking` and `modules.defender_policy` default to `true`.
+`modules.log_analytics_kql` is opt-in and requires diagnostic linkage from
+`defender_policy`. Configure these in `assessment.yaml`; CLI target/profile
+and metric overrides retain their existing precedence. Disabled, denied,
+unsupported and partially collected signals remain explicit coverage gaps.
+
+| Rules / signals | Decision and evidence boundary |
+| --- | --- |
+| SEC-003 | Inspect only linked injected subnets and attached NSGs, including custom/default inbound rules in priority order. Confirmed missing NSGs, broad public TCP 80/443 allowances, or explicit blocked classic management/load-balancer ports fail. Specific CIDR/ASG/destination exceptions remain conservative unknowns. V2 injection does not inherit classic 3443/6390 requirements; outbound integration is not inbound isolation. No routing/reachability or WAF bypass claim is made. |
+| Private endpoints / DDoS | Inspect explicitly linked private endpoint target/approval/subnet metadata and customer public IP DDoS mode, including linked VNet inheritance where available. Hash adjacent resource references; retain no raw IPs/CIDRs. No customer public IP link does not prove DDoS protection absent. These are report context, not additional rules. |
+| REL-004 / COST-003 | Read subscription autoscale settings, retaining only exact APIM targets. Review enabled elastic profiles and positive increase/decrease actions. Scale-in is not applicable without enabled elastic profiles. Developer unsupported; Consumption automatically scales. Profiles and triggers require workload validation; native autoscale covers primary-region units only. |
+| OPS-001 | Require an enabled resource `GatewayLogs` category or `allLogs` group with a destination. APIM Application Insights diagnostics are separate. A confirmed setting is not ingestion or retention proof. Consumption resource logs are unsupported. |
+| SEC-025 | Require both the Defender `Api` subscription plan and successfully provisioned explicit REST API onboarding. Current documented classic tier/region limits apply. Unknown API types are not assumed REST; workspace/self-hosted runtime coverage is not established. |
+| OPS-005 | Query latest policy evaluations for the exact resource without starting an evaluation or remediation. Keep initiative references separate and retain conflicting latest-timestamp states. Fresh NonCompliant fails; Compliant passes the observed-state check; Exempt is N/A. Empty, stale, future, conflict and error states cannot pass. Default maximum age is two days (review heuristic). Assignment/definition/initiative references are hashed. |
+| SEC-006 / PERF-005 | Optional aggregate KQL adds positive legacy TLS observations, request-level backend latency p95, gateway/backend 5xx counts and bounded hashed API hotspots. Default review thresholds are strictly above 2000 ms / 1% gateway errors; equality does not fail. Missing/empty/partial samples cannot establish a healthy runtime pass. Positive TLS evidence overrides disabled service flags. |
+
+KQL uses only enabled GatewayLogs diagnostic workspace links, not arbitrary
+workspace discovery. It queries the configured `ApiManagementGatewayLogs` or
+`AzureDiagnostics` destination with an exact APIM resource filter and the
+same UTC telemetry window as metrics. Legacy optional columns (including
+`AdditionalFields`) retain known-value counts rather than inventing zeroes.
+Each workspace/table sample is assessed separately; duplicated destinations
+are deduplicated and samples/percentiles are never summed or averaged across
+destinations. Historic logs routed to a different destination/table are not
+discovered. Sampling, retention and logging exclusions can limit the sample;
+these results are not a population-wide traffic guarantee.
+
+Only numeric aggregates and bounded API hotspot hashes are saved, never
+raw log rows, caller IPs, URLs, headers or request/response bodies.
+`telemetry.kql_max_rows` bounds hotspot rows to 1-100 (default 5), and
+`kql_timeout_seconds` bounds query execution to 1-180 seconds (default 30).
+Cache hit/miss counts and ratios are report context, not a claim that every
+API should cache. A query error, including partial results, saves an explicit
+warning rather than returned raw content.
+
 ### Policy collection and interpretation
 
 Collection uses APIM REST `2024-05-01` GET operations for APIs, operations,
@@ -198,9 +238,9 @@ is absent but explicit HTTP(S) transport metadata is present, the matrix
 labels the assessment as HTTP gateway policies only. The type stays null:
 no API type or protocol-specific GraphQL resolver coverage is invented.
 
-New artifacts use schema `1.2`. Schema `1.0`/`1.1` snapshots still analyze
+New artifacts use schema `1.3`. Schema `1.0`/`1.1`/`1.2` snapshots still analyze
 offline using available evidence. Their original digest contracts and
-five-/eleven-rule findings remain reportable without reinterpreting scores.
+five-/eleven-/forty-rule findings remain reportable without reinterpreting scores.
 
 These are assessment heuristics, not autoscale actions. Hourly averages can
 hide shorter peaks; their p95 is not a request latency percentile. Right-sizing
@@ -232,10 +272,12 @@ Current authoritative grounding (reviewed 2026-11-10):
 - [Application Insights overhead and sampling](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-app-insights)
 - [Content-validation limits and performance](https://learn.microsoft.com/en-us/azure/api-management/validate-content-policy)
 
-Iteration 4 retains adjacent networking, governance, autoscale and
-dimensioned/KQL telemetry checks (REL-004/005, SEC-003/025, COST-003,
-OPS-001/005 and PERF-005). Gateway node-health evidence (OPS-006) also remains
-deferred rather than inferred from inventory. Iteration 5 retains upstream
+Iteration 4 adds seven rules (REL-004, SEC-003/025, COST-003, OPS-001/005 and
+PERF-005), extends SEC-006 runtime evidence, and retains the existing report
+and deterministic scoring contracts. Secondary-region custom alerting
+(REL-005) and gateway node health (OPS-006) remain deferred: neither is
+included in Iteration 4's collector acceptance list, and neither is inferred
+from inventory. Iteration 5 retains upstream
 WAF-dependent SEC-002/004/005, AI Gateway rules, narrative enrichment, roadmap
 and Docker. These modules/rules are not stubbed or silently accepted.
 
@@ -254,7 +296,11 @@ CI runs the same checks on Python 3.11/3.13, Windows/Linux:
 Tests use synthetic data, fake credentials and mocked HTTP; they do not
 access Azure. An explicit live smoke test requires an authorized resource ID
 and credentials: run `assess` above, review `collection_warnings`, and inspect
-the three local artifacts. Reader plus permission to read Azure Monitor
-metrics is the intended access level. Do not retrieve keys or change resource
+the three local artifacts. In addition to APIM read access, enabled modules
+need read access to linked networking, diagnostic settings, subscription
+autoscale/Defender plan, service API collections and Policy Insights states.
+Optional KQL requires query access to linked workspaces. Permission gaps
+are expected structured evidence, not a reason to grant write access.
+Do not retrieve keys or change resource
 configuration to unblock collection. Live verification is a separate
 acceptance gate; a PR without it stays draft.

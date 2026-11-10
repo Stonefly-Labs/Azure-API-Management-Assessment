@@ -152,7 +152,9 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
       Historical policy interpretations are preserved; rerun analyze to apply current checks.
       {% else %}Core APIM five-pillar catalog; {{ scope.findings | length }} rule results in this scope.{% endif %} Not a complete MCSB compliance assessment.
       Unknown and unsupported signals are never treated as passes. Policy results assess configuration,
-      not runtime enforcement. Adjacent-network, upstream WAF and AI gateway analysis remain outside scope.</div>
+      not runtime enforcement. {% if iteration == "4" %}Linked network/governance metadata and optional
+      aggregate gateway logs are included when available. {% else %}Adjacent-network analysis remains outside
+      this historical assessment. {% endif %}Upstream WAF and AI gateway analysis remain outside scope.</div>
     {% for instance in scope.instances %}
     <article>
       <h3>{{ instance.name }}</h3>
@@ -185,7 +187,7 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
       results, not instance averages. Coverage counts above must accompany every score.</p>
     <p class="muted">Each rule contributes once per instance, not once per operation.
       The policy matrix shows context coverage separately. Waivers retain original outcomes and evidence but are excluded from scores.</p>
-    {% if iteration == "3" %}
+    {% if iteration in ["3", "4"] %}
     <div class="card">
       <h3>MCSB assessed-mapping rate</h3>
       <div class="score">{{ scope.mcsb_score if scope.mcsb_score is not none else "N/A" }}</div>
@@ -258,7 +260,7 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
         </tbody>
       </table>
     </div>
-    <p class="muted">Unimplemented networking, governance and upstream WAF controls are outside this catalog,
+    <p class="muted">Unimplemented controls, including upstream WAF, are outside this catalog,
       not silently passed or included in the denominator.</p>
   </section>
   <section class="slide">
@@ -281,7 +283,44 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
       <p>VNet mode: {{ instance.virtual_network_type or "Not collected" }} /
         Public network access: {{ instance.public_network_access or "Not collected" }} /
         Private endpoint states: {{ instance.private_endpoint_statuses if instance.private_endpoint_statuses is not none else "Not collected" }}</p>
-      <p class="muted">Logical configuration only. No NSG, WAF, routing or runtime reachability was verified.</p>
+      <p class="muted">Logical configuration only. Linked NSG metadata is not proof of WAF, routing or runtime reachability.</p>
+      {% if iteration == "4" %}
+      <h3>Adjacent signal coverage</h3>
+      <p>Networking: {{ instance.networking.status if instance.networking else "not collected" }} /
+        Injected subnets: {{ instance.networking.subnets_status if instance.networking else "not collected" }} /
+        Log Analytics: {{ instance.log_analytics.status if instance.log_analytics else "not collected" }}</p>
+      {% if instance.networking %}
+      {% for endpoint in instance.networking.private_endpoints %}
+      <p>Private endpoint {{ endpoint.reference }}: {{ endpoint.status }} / approved={{ endpoint.approved }} / subnet linkage={{ endpoint.subnet_linked }}.</p>
+      {% endfor %}
+      {% for address in instance.networking.public_ips %}
+      <p>Public IP {{ address.reference }}: {{ address.status }} / DDoS mode={{ address.ddos_mode if address.ddos_mode else "unknown" }} / inherited VNet protection={{ address.vnet_ddos_enabled }}.</p>
+      {% endfor %}
+      <p class="muted">Only explicitly linked public IP resources are probed. No link is not evidence that DDoS protection is absent.</p>
+      {% endif %}
+      {% if instance.governance %}
+      <p>Resource diagnostics: {{ instance.governance.diagnostics_status }} /
+        Autoscale: {{ instance.governance.autoscale_status }} /
+        Defender: {{ instance.governance.defender_status }} /
+        Policy states: {{ instance.governance.policy_status }}</p>
+      {% endif %}
+      {% if instance.log_analytics %}
+      {% for workspace in instance.log_analytics.workspaces %}
+      <p>Log sample {{ workspace.workspace }} / {{ workspace.table }}: {{ workspace.status }}.</p>
+      {% if workspace.aggregate %}
+      <p>Logged requests={{ workspace.aggregate.requests }} /
+        TLS-known={{ workspace.aggregate.tls_known }}, legacy TLS={{ workspace.aggregate.weak_tls }} /
+        Gateway 5xx={{ workspace.aggregate.gateway_5xx }}, backend 5xx={{ workspace.aggregate.backend_5xx }} /
+        Backend p95={{ workspace.aggregate.backend_p95_ms if workspace.aggregate.backend_p95_ms is not none else "unknown" }} ms /
+        Cache hits={{ workspace.aggregate.cache_hits }}, misses={{ workspace.aggregate.cache_misses }}.
+        {% set cache_total = workspace.aggregate.cache_hits + workspace.aggregate.cache_misses %}
+        Cache hit ratio={{ "%.1f%%" | format(100 * workspace.aggregate.cache_hits / cache_total) if cache_total else "not observed" }}.</p>
+      {% endif %}
+      {% endfor %}
+      {% endif %}
+      <p class="muted">Log counts describe recorded samples, not all callers. Workspaces/tables are not added together.
+        Raw callers, URLs, request/response bodies, headers and log rows are not saved.</p>
+      {% endif %}
       <div class="table-wrap">
       <table>
         <thead><tr><th>Metric / region</th><th>Status</th><th>Samples</th><th>Mean hourly average</th><th>Peak maximum</th><th>Total</th></tr></thead>
