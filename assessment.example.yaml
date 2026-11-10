@@ -1,0 +1,13 @@
+# Only Iteration 1 options are accepted; future modules/rule overrides are not implemented.
+env: auto
+targets:
+  instances:
+    - resource_id: /subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/example-rg/providers/Microsoft.ApiManagement/service/example-apim
+      env: non-prod
+  # ARM discovery is read-only and restricted to explicitly listed subscriptions.
+  subscriptions: []
+  resource_groups: []
+modules:
+  metrics: true
+telemetry:
+  lookback_days: 14

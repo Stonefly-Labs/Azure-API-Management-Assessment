@@ -1,0 +1,70 @@
+- id: APIM-REL-001
+  title: Developer tier is not suitable for production
+  pillar: REL
+  severity: Critical
+  non_prod_severity: Advisory
+  evaluator: developer_sku
+  applicability: Known managed-service SKUs; Developer failure is advisory outside production.
+  required_signals: [ARM service.sku.name, environment profile]
+  description: Determine whether an instance uses the SLA-less Developer tier.
+  business_impact: Production on Developer lacks a production availability commitment.
+  remediation: For production, select an SLA-backed tier and validate capacity and migration requirements.
+  references:
+    - https://learn.microsoft.com/en-us/azure/reliability/reliability-api-management
+- id: APIM-REL-002
+  title: Review regional availability-zone redundancy
+  pillar: REL
+  severity: High
+  non_prod_severity: Advisory
+  evaluator: zone_redundancy
+  applicability: Premium classic explicit zones; v2 redundancy is unknown with this API projection.
+  required_signals: [ARM service.sku, ARM service.location, ARM service.zones, ARM additionalLocations]
+  description: Fail explicitly single-zone classic Premium regions; empty lists are unknown because automatic placement exists.
+  business_impact: A zonal gateway can lose availability during an availability-zone outage.
+  remediation: Review current regional capabilities and choose multi-zone or automatic placement appropriate to the tier; verify actual redundancy separately.
+  references:
+    - https://learn.microsoft.com/en-us/azure/reliability/reliability-api-management
+    - https://learn.microsoft.com/en-us/rest/api/apimanagement/api-management-service/get?view=rest-apimanagement-2024-05-01
+- id: APIM-SEC-001
+  title: No VNet injection or approved inbound private endpoint observed
+  pillar: SEC
+  mcsb_controls: [NS-1, NS-2]
+  severity: High
+  non_prod_severity: High
+  evaluator: network_posture
+  applicability: Managed SKUs with injection or inbound Private Link support; outbound v2 integration is not inbound isolation.
+  required_signals: [ARM service.sku, ARM virtualNetworkType, ARM privateEndpointConnections, ARM publicNetworkAccess]
+  description: Assess configured network controls only, not runtime reachability or complete MCSB compliance.
+  business_impact: Lack of network controls can expose gateway endpoints to unwanted access.
+  remediation: Select supported VNet injection or inbound Private Link as appropriate, then separately verify public access and NSG restrictions.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/virtual-network-concepts
+    - https://learn.microsoft.com/en-us/security/benchmark/azure/baselines/api-management-security-baseline
+- id: APIM-COST-001
+  title: Low observed utilization warrants a right-sizing review
+  pillar: COST
+  severity: Medium
+  non_prod_severity: Medium
+  evaluator: low_capacity
+  applicability: Basic, Standard and Premium classic with complete 14-day hourly regional Capacity evidence.
+  required_signals: [ARM service.sku, ARM regional topology, Azure Monitor Capacity hourly Average]
+  description: Flag peak hourly average Capacity below 25% only with complete evidence for every region.
+  business_impact: Sustained low utilization may indicate avoidable dedicated gateway spend.
+  remediation: Review representative peak demand, growth and redundancy requirements; load-test before changing units or SKU.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/api-management-capacity
+    - https://learn.microsoft.com/en-us/azure/azure-monitor/reference/supported-metrics/microsoft-apimanagement-service-metrics
+- id: APIM-PERF-001
+  title: Elevated gateway capacity, CPU or memory
+  pillar: PERF
+  severity: Critical
+  non_prod_severity: Critical
+  evaluator: saturation
+  applicability: Classic Capacity or v2 CpuPercent_Gateway and MemoryPercent_Gateway; Consumption unsupported.
+  required_signals: [ARM service.sku, ARM regional topology, Azure Monitor hourly capacity metrics]
+  description: Flag p95 of hourly Average above 70% or a v2 CPU/memory Maximum above 85%; never use classic Capacity Maximum for scaling.
+  business_impact: Resource saturation can increase gateway latency, timeouts and dropped connections.
+  remediation: Investigate sustained load and individual regions, correlate with latency, and load-test before scaling; isolated maxima are not automatic scaling decisions.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/api-management-capacity
+    - https://learn.microsoft.com/en-us/azure/azure-monitor/reference/supported-metrics/microsoft-apimanagement-service-metrics

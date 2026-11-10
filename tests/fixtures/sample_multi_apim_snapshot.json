@@ -1,0 +1,71 @@
+{
+  "schema_version": "1.0",
+  "collected_at": "2026-01-15T00:10:00Z",
+  "telemetry_start": "2026-01-01T00:00:00Z",
+  "telemetry_end": "2026-01-15T00:00:00Z",
+  "instances": [
+    {
+      "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/sample-prod/providers/Microsoft.ApiManagement/service/sample-prod",
+      "name": "sample-prod",
+      "environment": "prod",
+      "environment_source": "synthetic fixture",
+      "core_status": "available",
+      "location": "eastus",
+      "sku": {"name": "Premium", "capacity": 2},
+      "zones": ["1", "2"],
+      "additional_locations": [{"location": "westus2", "zones": ["1"], "capacity": 1}],
+      "virtual_network_type": "Internal",
+      "public_network_access": "Enabled",
+      "private_endpoint_statuses": [],
+      "identity_type": "SystemAssigned",
+      "custom_properties": {},
+      "metrics": [
+        {
+          "name": "Capacity",
+          "location": "eastus",
+          "status": "available",
+          "unit": "Percent",
+          "points": [{"timestamp": "2026-01-01T00:00:00Z", "average": 75}]
+        }
+      ]
+    },
+    {
+      "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/sample-dev/providers/Microsoft.ApiManagement/service/sample-dev",
+      "name": "sample-dev",
+      "environment": "non-prod",
+      "environment_source": "synthetic fixture",
+      "core_status": "available",
+      "location": "eastus",
+      "sku": {"name": "Developer", "capacity": 1},
+      "zones": [],
+      "additional_locations": [],
+      "virtual_network_type": "None",
+      "public_network_access": "Enabled",
+      "private_endpoint_statuses": [],
+      "metrics": []
+    },
+    {
+      "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/sample-v2/providers/Microsoft.ApiManagement/service/sample-v2",
+      "name": "sample-v2",
+      "environment": "prod",
+      "environment_source": "synthetic fixture",
+      "core_status": "available",
+      "location": "westus2",
+      "sku": {"name": "StandardV2", "capacity": 2},
+      "zones": [],
+      "additional_locations": [],
+      "virtual_network_type": "External",
+      "public_network_access": "Enabled",
+      "private_endpoint_statuses": ["Approved"],
+      "metrics": []
+    }
+  ],
+  "collection_warnings": [
+    {
+      "module": "metrics",
+      "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/sample-prod/providers/Microsoft.ApiManagement/service/sample-prod",
+      "code": "SYNTHETIC_PARTIAL_DATA",
+      "message": "Synthetic example has only one capacity sample; this is not complete telemetry."
+    }
+  ]
+}
