@@ -25,6 +25,9 @@ silently changing the plan.
   after a human has merged the current PR and explicitly requested the next.
 - Use `.github\skills\deliver-iteration\SKILL.md` for iteration delivery and
   `.github\skills\add-assessment-rule\SKILL.md` for rule additions or changes.
+- Use `.github\skills\cut-release\SKILL.md` only for an explicitly requested
+  post-merge release with a supplied version. Releasing is a separate action,
+  not permission to merge a PR or begin the next iteration.
 
 ## Architecture and implementation
 
