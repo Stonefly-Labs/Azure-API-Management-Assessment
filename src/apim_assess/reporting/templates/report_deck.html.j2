@@ -138,6 +138,10 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
   <button type="button" data-panel="findings" aria-pressed="true">Findings</button>
   <button type="button" data-panel="policy" aria-pressed="false">Effective policies</button>
   <button type="button" data-panel="mcsb" aria-pressed="false">MCSB coverage</button>
+  {% if iteration == "5" %}
+  <button type="button" data-panel="modern" aria-pressed="false">Upstream &amp; AI gateway</button>
+  <button type="button" data-panel="roadmap" aria-pressed="false">Remediation roadmap</button>
+  {% endif %}
 </nav>
 <main>
 {% for scope in scopes %}
@@ -152,9 +156,11 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
       Historical policy interpretations are preserved; rerun analyze to apply current checks.
       {% else %}Core APIM five-pillar catalog; {{ scope.findings | length }} rule results in this scope.{% endif %} Not a complete MCSB compliance assessment.
       Unknown and unsupported signals are never treated as passes. Policy results assess configuration,
-      not runtime enforcement. {% if iteration == "4" %}Linked network/governance metadata and optional
+      not runtime enforcement. {% if iteration in ["4", "5"] %}Linked network/governance metadata and optional
       aggregate gateway logs are included when available. {% else %}Adjacent-network analysis remains outside
-      this historical assessment. {% endif %}Upstream WAF and AI gateway analysis remain outside scope.</div>
+      this historical assessment. {% endif %}{% if iteration == "5" %}Optional upstream WAF
+      probes and recognized LLM/GraphQL checks are included with explicit evidence limits.
+      {% else %}Upstream WAF and AI gateway analysis remain outside scope.{% endif %}</div>
     {% for instance in scope.instances %}
     <article>
       <h3>{{ instance.name }}</h3>
@@ -187,7 +193,7 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
       results, not instance averages. Coverage counts above must accompany every score.</p>
     <p class="muted">Each rule contributes once per instance, not once per operation.
       The policy matrix shows context coverage separately. Waivers retain original outcomes and evidence but are excluded from scores.</p>
-    {% if iteration in ["3", "4"] %}
+    {% if iteration in ["3", "4", "5"] %}
     <div class="card">
       <h3>MCSB assessed-mapping rate</h3>
       <div class="score">{{ scope.mcsb_score if scope.mcsb_score is not none else "N/A" }}</div>
@@ -260,7 +266,7 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
         </tbody>
       </table>
     </div>
-    <p class="muted">Unimplemented controls, including upstream WAF, are outside this catalog,
+    <p class="muted">Unimplemented controls{% if iteration != "5" %}, including upstream WAF,{% endif %} are outside this catalog,
       not silently passed or included in the denominator.</p>
   </section>
   <section class="slide">
@@ -284,7 +290,7 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
         Public network access: {{ instance.public_network_access or "Not collected" }} /
         Private endpoint states: {{ instance.private_endpoint_statuses if instance.private_endpoint_statuses is not none else "Not collected" }}</p>
       <p class="muted">Logical configuration only. Linked NSG metadata is not proof of WAF, routing or runtime reachability.</p>
-      {% if iteration == "4" %}
+      {% if iteration in ["4", "5"] %}
       <h3>Adjacent signal coverage</h3>
       <p>Networking: {{ instance.networking.status if instance.networking else "not collected" }} /
         Injected subnets: {{ instance.networking.subnets_status if instance.networking else "not collected" }} /
@@ -334,6 +340,81 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
     </article>
     {% endfor %}
   </section>
+  {% if iteration == "5" %}
+  <section class="slide" data-panel="modern">
+    <p class="eyebrow">Upstream WAF &amp; AI gateway / {{ scope.title }}</p>
+    <h2>Matched paths, explicit evidence limits</h2>
+    <p>Upstream matching uses observed gateway hostnames/IPs in the authorized scope, not DNS traversal.
+      A WAF attachment alone is not origin lockdown. HTTPS forwarding, bot/rate controls and probes
+      are configuration observations, not live traffic tests.</p>
+    {% for instance in scope.instances %}
+    <article>
+      <h3>{{ instance.name }}</h3>
+      {% if instance.upstream %}
+      {% for provider, probe in [("Front Door", instance.upstream.afd), ("Application Gateway", instance.upstream.appgw)] %}
+      <h4>{{ provider }}: {{ probe.status }} / {{ probe.candidates }} candidate(s)</h4>
+      {% for route in probe.routes %}
+      <details>
+        <summary>Matched route <code>{{ route.reference }}</code></summary>
+        <p>Source network restriction: {{ route.network_restricted }} /
+          HTTPS-only: {{ route.https_only }} / explicit HTTPS probe: {{ route.health_probe }}.</p>
+        {% if route.waf %}
+        <p>WAF enabled: {{ route.waf.enabled }} / Prevention: {{ route.waf.prevention }} /
+          blocking managed rules: {{ route.waf.managed_rules }} /
+          bot rules: {{ route.waf.bot_protection }} / rate-limit rule: {{ route.waf.rate_limiting }}.</p>
+        {% else %}<p>WAF metadata unavailable; protection is not established.</p>{% endif %}
+      </details>
+      {% else %}<p>No matched route observed; this does not prove WAF absence.</p>{% endfor %}
+      {% endfor %}
+      {% else %}<p>Upstream probes were not collected.</p>{% endif %}
+    </article>
+    {% endfor %}
+    <h3>Modern workload control observations</h3>
+    <p>Endpoint classification is heuristic and secret-free. Unknown custom endpoints are not assumed
+      to be Azure OpenAI; managed identity is not prescribed for third-party LLM providers.
+      No model prompts/responses or inference calls are collected.</p>
+    {% for finding in scope.findings if finding.rule.id.startswith("APIM-AIGW-") %}
+    <details class="card">
+      <summary>{{ finding.rule.id }} / {{ finding.result.outcome }} / {{ finding.severity }} /
+        <code>{{ finding.resource_id }}</code></summary>
+      {% if finding.waiver_justification %}<p>Waived: {{ finding.waiver_justification }}</p>{% endif %}
+      <p>{{ finding.result.summary }}</p>
+      {% for evidence in finding.result.evidence %}<p>{{ evidence.detail }}</p>{% endfor %}
+    </details>
+    {% endfor %}
+  </section>
+  <section class="slide" data-panel="roadmap">
+    <p class="eyebrow">Prioritized remediation / {{ scope.title }}</p>
+    <h2>30 / 60 / 90-day planning roadmap</h2>
+    <p>Deterministic severity-first planning buckets, not delivery commitments or effort estimates.
+      Validate business risk, dependencies and change windows with owners. Only unwaived failures
+      appear below; unknown/unsupported coverage still needs investigation in the explorer.</p>
+    {% for title, items in roadmap(scope.findings) %}
+    <article>
+      <h3>{{ title }}</h3>
+      {% for finding in items %}
+      <details>
+        <summary>{{ finding.severity }} / {{ finding.rule.id }} / {{ finding.rule.title }} /
+          <code>{{ finding.resource_id }}</code></summary>
+        <p>{{ finding.rule.business_impact }}</p>
+        <p>{{ finding.rule.remediation }}</p>
+      </details>
+      {% else %}<p>No unwaived confirmed failures in this planning bucket.</p>{% endfor %}
+    </article>
+    {% endfor %}
+    {% if scope.portfolio %}
+    <article>
+      <h3>Optional AI executive commentary</h3>
+      <p>Aggregate-only portfolio commentary is unverified synthesis, not assessment evidence.
+        Findings, applicability, severity, waivers and scores remain deterministic and unchanged.</p>
+      {% if narrative and narrative.status == "complete" %}
+      <p>{{ narrative.text }}</p>
+      {% elif narrative %}<p>Enrichment unavailable: {{ narrative.error_code }}. No generated text was retained.</p>
+      {% else %}<p>Not requested. This report and roadmap require no AI service.</p>{% endif %}
+    </article>
+    {% endif %}
+  </section>
+  {% endif %}
   <section class="slide findings-panel" data-panel="findings">
     <p class="eyebrow">Rule results / {{ scope.title }}</p>
     <h2>Evidence &amp; remediation</h2>
@@ -373,7 +454,7 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
       </details>
     </article>
     {% else %}<p>No rule results.</p>{% endfor %}
-    {% if iteration == "3" %}
+    {% if iteration in ["3", "4", "5"] %}
     <details><summary>Saved assessment thresholds</summary>
       {% for name, value in rule_settings.thresholds.model_dump().items() %}<p><code>{{ name }}</code>: {{ value }}</p>{% endfor %}
       <p>Severity overrides take precedence over profile defaults. Resource-scoped waivers take precedence over global waivers.</p>

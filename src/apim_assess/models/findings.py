@@ -67,13 +67,13 @@ class Thresholds(Model):
     app_insights_max_sampling_pct: float = Field(default=50.0, ge=0, le=100)
     diagnostic_body_bytes: int = Field(default=1024, ge=0, le=8192)
     payload_max_bytes: int = Field(default=102400, ge=1, le=4194304)
-    backend_latency_ms: float = Field(default=2000, gt=0, le=300000)
-    gateway_error_pct: float = Field(default=1, ge=0, le=100)
+    backend_latency_ms: float = Field(default=2000.0, gt=0, le=300000)
+    gateway_error_pct: float = Field(default=1.0, ge=0, le=100)
     policy_max_age_days: int = Field(default=2, ge=1, le=30)
 
 
 class Waiver(Model):
-    rule_id: str = Field(pattern=r"^APIM-(REL|SEC|COST|OPS|PERF)-[0-9]{3}$")
+    rule_id: str = Field(pattern=r"^APIM-(REL|SEC|COST|OPS|PERF|AIGW)-[0-9]{3}$")
     justification: str = Field(min_length=1, max_length=2000)
     resource_id: ResourceId | None = None
 
@@ -114,8 +114,23 @@ class McsbCoverage(Model):
     waived: int
 
 
+class Narrative(Model):
+    status: Literal["complete", "unavailable"]
+    text: str | None = Field(default=None, min_length=1, max_length=4000)
+    error_code: str | None = None
+
+    @model_validator(mode="after")
+    def consistent_status(self) -> "Narrative":
+        if self.status == "complete":
+            if self.text is None or self.error_code is not None:
+                raise ValueError("Complete narratives require text and no error")
+        elif self.text is not None or self.error_code is None:
+            raise ValueError("Unavailable narratives require an explicit error and no text")
+        return self
+
+
 class PortfolioAssessment(Model):
-    schema_version: Literal["1.0", "1.1", "1.2", "1.3"] = "1.3"
+    schema_version: Literal["1.0", "1.1", "1.2", "1.3", "1.4"] = "1.4"
     snapshot_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
     findings: list[Finding]
     pillar_scores: list[PillarScore]
@@ -123,9 +138,12 @@ class PortfolioAssessment(Model):
     rule_settings: RuleSettings = Field(default_factory=RuleSettings)
     mcsb_coverage: list[McsbCoverage] = Field(default_factory=list)
     mcsb_assessed_score: float | None = Field(default=None, ge=0, le=100)
+    narrative: Narrative | None = None
 
     @model_validator(mode="after")
     def consistent_version(self) -> "PortfolioAssessment":
+        if self.schema_version != "1.4" and self.narrative is not None:
+            raise ValueError("Narrative enrichment requires findings schema 1.4")
         if self.schema_version == "1.0" and self.policy_coverage:
             raise ValueError("Policy coverage requires findings schema 1.1")
         if self.schema_version in {"1.0", "1.1"} and (

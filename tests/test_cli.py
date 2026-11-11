@@ -38,7 +38,7 @@ def test_offline_stages_do_not_instantiate_azure_credentials(tmp_path, monkeypat
         ],
     )
     assert result.exit_code == 0, result.output
-    assert len(PortfolioAssessment.model_validate_json(findings.read_text()).findings) == 141
+    assert len(PortfolioAssessment.model_validate_json(findings.read_text()).findings) == 162
     assert "Portfolio readout" in report.read_text()
 
 

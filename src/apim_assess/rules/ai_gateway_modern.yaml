@@ -1,0 +1,73 @@
+- id: APIM-AIGW-001
+  title: Recognized LLM route lacks a fixed token rate limit or quota
+  pillar: COST
+  severity: High
+  non_prod_severity: Medium
+  evaluator: ai_token_limit
+  applicability: Recognized Azure OpenAI and LLM endpoints in HTTP gateway execution contexts. Consumption token limits are unsupported. Custom proxy endpoints and dynamic routing stay unknown.
+  required_signals: [sanitized endpoint classification, effective inbound policy, complete backend and API inventory]
+  description: Require an unconditional llm-token-limit or legacy azure-openai-token-limit with a positive fixed rate or quota/period, a counter key and explicit estimation setting. Resolve inheritance and branches; a tag alone is not protection.
+  business_impact: Unbounded token consumption can exhaust shared quotas and increase spend.
+  remediation: Configure workload-specific token budgets and consumer counter keys; test streaming, token estimation and concurrency. Gateway-local counters do not enforce a global spending cap.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/llm-token-limit-policy
+    - https://learn.microsoft.com/en-us/azure/api-management/genai-gateway-capabilities
+- id: APIM-AIGW-002
+  title: Azure OpenAI route lacks configured managed identity authentication
+  pillar: SEC
+  mcsb_controls: [IM-3]
+  severity: High
+  non_prod_severity: Medium
+  evaluator: ai_managed_identity
+  applicability: Recognized Azure OpenAI HTTP routes only. Managed identity is not prescribed for third-party LLM providers; workspace authentication-managed-identity support is not assumed.
+  required_signals: [sanitized endpoint classification, effective backend authentication, backend credential presence]
+  description: Require unconditional managed identity for the Cognitive Services audience without ignore-error, custom output token handling or static API-key credentials. Header rewrites and unresolved routes are unknown. This does not prove identity permissions or token acquisition.
+  business_impact: Static backend API keys create rotation and credential exposure burdens.
+  remediation: Enable an appropriate service identity and least-privilege model access; use authentication-managed-identity with resource https://cognitiveservices.azure.com, remove static API keys and validate requests.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/authentication-managed-identity-policy
+    - https://learn.microsoft.com/en-us/azure/api-management/api-management-policy-reference
+    - https://learn.microsoft.com/en-us/security/benchmark/azure/baselines/api-management-security-baseline
+- id: APIM-AIGW-003
+  title: Azure OpenAI route lacks a multi-member pool with 429-aware breakers
+  pillar: REL
+  severity: High
+  non_prod_severity: Medium
+  evaluator: ai_resilient_pool
+  applicability: Recognized Azure OpenAI routes on non-Consumption managed gateways. Backend namespace, distinct member references and effective final routing are honored.
+  required_signals: [effective backend route, pool member references, positive breaker thresholds and durations, status ranges and acceptRetryAfter]
+  description: Require every selected route to use a pool with at least two distinct collected members, each with a valid positive breaker covering 429 and accepting Retry-After. Missing members, cycles and dynamic routes remain unknown.
+  business_impact: A single throttled endpoint can stall AI requests despite capacity on other deployments.
+  remediation: Validate deployment/model compatibility, configure a multi-member backend pool and 429 breakers accepting Retry-After. Test recovery; approximate distributed breakers are not a failover or capacity guarantee.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/backends
+    - https://learn.microsoft.com/en-us/rest/api/apimanagement/backend/get?view=rest-apimanagement-2024-05-01
+- id: APIM-AIGW-004
+  title: Recognized LLM route lacks configured token metric emission
+  pillar: OPS
+  severity: Medium
+  non_prod_severity: Low
+  evaluator: ai_token_metrics
+  applicability: Recognized LLM HTTP gateway contexts; Application Insights logger metadata is required for a positive configuration observation. Runtime support and token reporting depend on provider/schema.
+  required_signals: [effective inbound policy, Application Insights logger inventory, sanitized endpoint classification]
+  description: Require unconditional llm-emit-token-metric or legacy azure-openai-emit-token-metric with a literal namespace and an Application Insights logger. Dynamic namespaces and missing logger evidence remain unknown.
+  business_impact: Missing token telemetry limits consumption attribution, quota tuning and cost investigation.
+  remediation: Configure an Application Insights logger and custom metrics, emit token metrics with bounded dimensions, and verify ingestion and provider usage fields including streaming behavior.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/llm-emit-token-metric-policy
+    - https://learn.microsoft.com/en-us/azure/api-management/genai-gateway-capabilities
+- id: APIM-AIGW-005
+  title: GraphQL API lacks effective request size and depth protection
+  pillar: SEC
+  severity: High
+  non_prod_severity: Medium
+  evaluator: graphql_validation
+  applicability: Explicit GraphQL APIs, API/global/product inbound policy contexts. Operation-scoped placement cannot pass. Conflicting workspace support references are treated conservatively as unsupported.
+  required_signals: [explicit GraphQL API type, resolved policy scopes and fragments, complete API inventory]
+  description: Require effective validate-graphql-request with positive max-size at most 102400 bytes and positive max-depth; the documented default depth is 6. Dynamic limits stay unknown. Field authorization and resolver policies are not assessed.
+  business_impact: Unbounded or deeply nested GraphQL requests can consume disproportionate gateway/backend resources.
+  remediation: Configure workload-appropriate GraphQL size and depth limits at a supported inbound scope and review field authorization separately. Test schema validation and rejected requests.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/validate-graphql-request-policy
+    - https://learn.microsoft.com/en-us/azure/api-management/api-management-policy-reference
+    - https://learn.microsoft.com/en-us/azure/api-management/mitigate-owasp-api-threats

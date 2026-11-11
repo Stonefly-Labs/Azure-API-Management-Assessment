@@ -16,7 +16,8 @@ from pydantic import (
 )
 
 from apim_assess.models.adjacent import Governance, LogAnalytics, Networking
-from apim_assess.models.policy import CATALOG_METADATA_FIELDS, Inventory
+from apim_assess.models.policy import CATALOG_METADATA_FIELDS, MODERN_METADATA_FIELDS, Inventory
+from apim_assess.models.upstream import Upstream
 
 Environment = Literal["prod", "non-prod"]
 Profile = Literal["auto", "prod", "non-prod"]
@@ -72,6 +73,7 @@ class CollectionWarning(Model):
         "networking",
         "governance",
         "log_analytics",
+        "upstream",
     ]
     resource_id: str
     code: str
@@ -147,10 +149,11 @@ class Instance(Model):
     networking: Networking | None = None
     governance: Governance | None = None
     log_analytics: LogAnalytics | None = None
+    upstream: Upstream | None = None
 
 
 class Snapshot(Model):
-    schema_version: Literal["1.0", "1.1", "1.2", "1.3"] = "1.3"
+    schema_version: Literal["1.0", "1.1", "1.2", "1.3", "1.4"] = "1.4"
     collected_at: AwareDatetime
     telemetry_start: AwareDatetime
     telemetry_end: AwareDatetime
@@ -165,7 +168,19 @@ class Snapshot(Model):
         if len(set(ids)) != len(ids):
             raise ValueError("Duplicate APIM resource IDs")
         for instance in self.instances:
-            if self.schema_version != "1.3" and any(
+            if self.schema_version != "1.4" and (
+                instance.upstream is not None
+                or instance.inventory is not None
+                and any(
+                    getattr(item.metadata, field) is not None
+                    for item in instance.inventory.resources
+                    for field in MODERN_METADATA_FIELDS
+                )
+            ):
+                raise ValueError(
+                    "Upstream and modern workload metadata require snapshot schema 1.4"
+                )
+            if self.schema_version not in {"1.3", "1.4"} and any(
                 value is not None
                 for value in (instance.networking, instance.governance, instance.log_analytics)
             ):

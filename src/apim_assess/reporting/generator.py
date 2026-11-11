@@ -7,6 +7,7 @@ from jinja2 import Environment, StrictUndefined
 from apim_assess.analyzer.engine import (
     ITERATION_2_IDS,
     ITERATION_4_IDS,
+    ITERATION_5_IDS,
     SEED_IDS,
     load_rules,
     mcsb_coverage,
@@ -33,6 +34,36 @@ class ReportScope(TypedDict):
     mcsb_score: float | None
     controls: list[str]
     apis: list[str]
+
+
+def roadmap(findings: list[Finding]) -> list[tuple[str, list[Finding]]]:
+    phases = [
+        ("Quick wins / 0-30 days", {"Critical", "High"}),
+        ("Short-term / 30-60 days", {"Medium"}),
+        ("Strategic / 60-90+ days", {"Low", "Advisory"}),
+    ]
+    return [
+        (
+            title,
+            sorted(
+                (
+                    finding
+                    for finding in findings
+                    if finding.result.outcome == "fail"
+                    and finding.waiver_justification is None
+                    and finding.severity in severities
+                ),
+                key=lambda finding: (
+                    {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "Advisory": 4}[
+                        finding.severity
+                    ],
+                    finding.rule.id,
+                    finding.resource_id.casefold(),
+                ),
+            ),
+        )
+        for title, severities in phases
+    ]
 
 
 def finding_apis(finding: Finding) -> list[str]:
@@ -72,10 +103,11 @@ def render(snapshot: Snapshot, assessment: PortfolioAssessment) -> str:
     rules = [
         rule
         for rule in load_rules()
-        if assessment.schema_version == "1.3"
+        if assessment.schema_version == "1.4"
         or (
-            rule.id not in ITERATION_4_IDS
-            if assessment.schema_version == "1.2"
+            rule.id not in ITERATION_5_IDS
+            and (assessment.schema_version == "1.3" or rule.id not in ITERATION_4_IDS)
+            if assessment.schema_version in {"1.2", "1.3"}
             else rule.id in (SEED_IDS if assessment.schema_version == "1.0" else ITERATION_2_IDS)
         )
     ]
@@ -106,7 +138,7 @@ def render(snapshot: Snapshot, assessment: PortfolioAssessment) -> str:
         raise ValueError("Finding environments do not match the snapshot.")
     if assessment.pillar_scores != scores(assessment.findings):
         raise ValueError("Stored pillar scores do not agree with the findings.")
-    if assessment.schema_version in {"1.2", "1.3"}:
+    if assessment.schema_version in {"1.2", "1.3", "1.4"}:
         validate_settings(assessment.rule_settings, snapshot)
         if assessment.mcsb_coverage != mcsb_coverage(assessment.findings) or (
             assessment.mcsb_assessed_score != mcsb_score(assessment.mcsb_coverage)
@@ -199,7 +231,11 @@ def render(snapshot: Snapshot, assessment: PortfolioAssessment) -> str:
         scopes=scopes,
         metric_summary=metric_summary,
         legacy=assessment.schema_version == "1.0",
-        iteration={"1.0": "1", "1.1": "2", "1.2": "3", "1.3": "4"}[assessment.schema_version],
+        iteration={"1.0": "1", "1.1": "2", "1.2": "3", "1.3": "4", "1.4": "5"}[
+            assessment.schema_version
+        ],
         finding_apis=finding_apis,
         rule_settings=assessment.rule_settings,
+        roadmap=roadmap,
+        narrative=assessment.narrative,
     )

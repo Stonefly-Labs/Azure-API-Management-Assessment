@@ -14,6 +14,13 @@ CATALOG_METADATA_FIELDS = {
     "application_insights",
     "logger_reference_hash",
 }
+MODERN_METADATA_FIELDS = {
+    "ai_backend",
+    "api_key_credential",
+    "pool_member_references",
+    "breaker_429",
+    "breaker_retry_after",
+}
 
 
 class PolicyModel(BaseModel):
@@ -73,6 +80,11 @@ class ResourceMetadata(PolicyModel):
         ]
         | None
     ) = None
+    ai_backend: Literal["azure_openai", "llm", "other", "unknown"] | None = None
+    api_key_credential: bool | None = None
+    pool_member_references: list[str] | None = None
+    breaker_429: bool | None = None
+    breaker_retry_after: bool | None = None
 
 
 class SubResource(PolicyModel):
