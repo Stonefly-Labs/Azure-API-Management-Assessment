@@ -153,6 +153,12 @@ The hybrid rule engine ships with **45+ rules** mapped across the 5 WAF Pillars 
 | `APIM-AIGW-004` | Azure OpenAI / LLM API lacks token metric emission (`azure-openai-emit-token-metric` / `llm-emit-token-metric`) for chargeback/observability | OPS / COST | Medium | Effective Policy |
 | `APIM-AIGW-005` | GraphQL API missing `<validate-graphql-request>` policy with `max-size` and `max-depth` protections | SEC / PERF | High | GraphQL API (`type == graphql`) + Effective Policy |
 
+**Planned Iteration 9 addition, not part of the implemented catalog:**
+
+| Rule ID | Title | WAF | Prod Severity | Non-Prod Severity | Signal Source |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `APIM-AIGW-006` | MCP endpoint lacks effective OAuth token validation | SEC | High | Medium | Explicit MCP inventory + effective inbound `validate-jwt` / `validate-azure-ad-token` + policy collection coverage |
+
 ---
 
 ## 3. Incremental "Steel-Thread" Delivery Plan (Strict Phase-Gated Execution)
@@ -164,7 +170,7 @@ The hybrid rule engine ships with **45+ rules** mapped across the 5 WAF Pillars 
 > 3. Open a Pull Request to `main`, and
 > 4. **STOP IMMEDIATELY** and wait for human review, testing, and merge before starting the next Iteration.
 
-Rather than building all collectors, all rules, and the report generator horizontally in isolation, execution follows a **vertical-slice (tracer-bullet) approach** across 8 distinct PR-gated phases:
+Rather than building all collectors, all rules, and the report generator horizontally in isolation, execution follows a **vertical-slice (tracer-bullet) approach** across 9 distinct PR-gated phases:
 
 ```text
 Phase / PR 1 (`feature/iter-1-steel-thread`)            ──► Live Auth + Basic APIM Config & Metrics + 5 Seed Rules + Minimal HTML Deck        [STOP & PR]
@@ -175,6 +181,7 @@ Phase / PR 5 (`feature/iter-5-waf-ai-gateway`)          ──► Optional AFD &
 Phase / PR 6 (`feature/iter-6-focused-report`)          ──► Focused HTML Readout + Grouped Evidence + Verification Gaps + Accessible Navigation [STOP & PR]
 Phase / PR 7 (`feature/iter-7-policy-secrets-and-urls`) ──► Deep Policy URL Scan + Key Vault Named Value Cross-Ref + AST Secret Scanner      [STOP & PR]
 Phase / PR 8 (`feature/iter-8-telemetry-trend-charts`)  ──► 30-Day Dimensional Metric Collector + Inline SVG Trend Charts in HTML Readout     [STOP & PR]
+Phase / PR 9 (`feature/iter-9-agent-gateway`)          ──► MCP & A2A Inventory + Effective Policy Inspection + MCP OAuth Security Finding     [STOP & PR]
 ```
 
 ### Iteration 1: End-to-End "Steel Thread" MVP (Connect, Read Config/Metrics, Render HTML)
@@ -319,6 +326,123 @@ data must not be copied into source, fixtures, or committed artifacts.
 3. **Acceptance & boundaries:**
    - Verify offline `analyze -> report` and mocked `assess` replay across Classic and v2 instances, partial/unavailable metric states, and legacy snapshots without dimensional series.
    - Keep all CSS, JS, and SVG inline with zero external runtime requests.
+
+---
+
+### Iteration 9: MCP & A2A AI Gateway Capabilities, Policies & OAuth Posture
+**Goal:** Surface native MCP servers and A2A agent APIs as first-class assessment
+resources, inspect their effective policies with the same evidence discipline as
+REST APIs, and flag MCP endpoints without configured OAuth token validation.
+
+**Status and gate:** Planned, not implemented. Start implementation only after a
+human has merged Iteration 8 and explicitly requested advancement. Recording this
+plan does not waive that gate or add a runtime rule.
+
+1. **Capability-aware discovery and sanitized collection:**
+   - Pin an authoritative management API contract that exposes MCP resources
+     (`2025-09-01-preview` or a verified later version). Confirm the published A2A
+     resource discriminator and API version before implementing its projection.
+     Do not infer native MCP/A2A types from API names, URL substrings or AI backends.
+   - Discover both REST-backed and passthrough MCP servers; collect their tool
+     sub-resources, backing API/operation references and safe transport metadata.
+     Collect A2A agent APIs and safe agent-card/runtime linkage metadata exposed
+     by the management plane. Do not treat MCP tools as ordinary API operations.
+   - Keep ordinary API collection intact and track modern inventory and policy
+     coverage separately. Preview denial, unsupported scopes, malformed metadata,
+     pagination gaps or older API-version fallback must not become "zero MCP/A2A
+     resources" or complete coverage. Preserve unrecognized resource types as an
+     explicit coverage gap rather than silently dropping them.
+   - Verify SKU, gateway and workspace support from current documentation at
+     implementation time. The documented MCP workspace limitation is unsupported,
+     not evidence of an unprotected or absent server.
+   - Use read-only management operations only. Never invoke MCP tools, perform
+     A2A tasks, follow arbitrary agent-card URLs, retrieve assessed subscription
+     keys or backend/user tokens, or persist raw credentials, backend URLs,
+     tool schemas/descriptions or agent-card payloads.
+
+2. **Effective policy inspection and existing rule integration:**
+   - Collect MCP server and A2A API XML policies and inspect applicable inherited
+     global/product/workspace policies only where those scopes are documented as
+     supported. Honor actual execution order, `<base />` placement, fragments and
+     conditional paths; do not assume REST scope semantics automatically apply.
+   - For REST-backed MCP tools, retain the link to the backing REST API/operation
+     and inspect that boundary separately. A validator on one backing operation
+     is not proof that every MCP entry point or tool is protected.
+   - Reuse existing caller-authentication, rate/concurrency, secret/URL, transport
+     and inheritance checks where protocol support and evidence justify them.
+     Unsupported request/body/streaming behavior must not cause false REST-based
+     passes or failures. Do not apply LLM token policies solely because an API is
+     MCP/A2A. A2A policy inspection is required, not just an inventory label.
+
+3. **New rule `APIM-AIGW-006`: MCP OAuth token validation:**
+   - **Decision:** Every assessed MCP entry point requires effective incoming
+     token validation using the correctly named `validate-jwt` or
+     `validate-azure-ad-token` policy. Check a meaningful validator configuration,
+     not tag presence, with issuer/tenant, signature/expiry and audience/client
+     restrictions as appropriate to the selected policy and issuer.
+   - A configured, unconditional validator covering every applicable known
+     execution context establishes a configuration pass. Inherited or
+     fragment-provided validation may count if it remains effective. Merely
+     placing validation inside one branch cannot establish complete protection.
+   - With complete applicable policy evidence, a confirmed unprotected MCP path
+     yields `fail`: High in production and Medium in non-production. The report
+     must display the security warning/error and remediation, for example:
+     **"MCP should be secured using OAuth 2.0. No effective validate-jwt or
+     validate-azure-ad-token policy was found for this MCP endpoint."**
+   - Missing permissions, unresolved fragments/conditions, incomplete inventory
+     or unavailable policy evidence yield `unknown` with a collection/coverage
+     warning, never a pass or a claim that validation is absent. Unsupported
+     capabilities and non-MCP contexts remain distinct from that result.
+   - Subscription keys, client-certificate validation, developer-portal OAuth
+     settings, forwarded Authorization headers, backend OAuth credentials and
+     `authentication-managed-identity` do not satisfy this incoming OAuth check.
+     They can be additional controls, not proof of caller token validation.
+   - This is the requested assessment baseline, stronger than Microsoft's
+     supported key-only option. Recommend provider-appropriate OAuth 2.0 token
+     validation and the current MCP OAuth 2.1 flow where applicable; do not claim
+     to certify OAuth discovery, PKCE, consent or authorization-server behavior.
+     Backend-enforced authentication remains separate, unverified evidence.
+   - Emit sanitized server/tool-context evidence, business impact, remediation
+     and Microsoft references. Honor waivers and severity overrides. Reuse
+     existing scoring, avoid scoring the same rule repeatedly per tool, and
+     explain overlap with generic authentication findings. Use WAF SEC; add an
+     MCSB mapping only if separately grounded.
+
+4. **Readout and portable artifacts:**
+   - Show distinct MCP/A2A counts, resource types, tools/backing relationships,
+     transports where collected, policy controls and verification gaps in the
+     existing portfolio/per-instance views. Surface OAuth findings in Findings,
+     Roadmap and policy coverage, with precise resource evidence.
+   - Preserve zero-CDN rendering, escaping, accessibility, themes and print
+     behavior. No report redesign, AI call or external runtime dependency.
+   - Extend snapshot/findings contracts explicitly and minimally. Keep saved
+     historical schemas `1.0`-`1.4`, digests and historical rule interpretations
+     replayable; old snapshots without MCP/A2A collection show "not collected."
+
+5. **Acceptance and boundaries:**
+   - Add synthetic mixed REST/MCP/A2A, Classic/v2 and multi-instance fixtures.
+     Cover pagination, denied/unsupported preview reads, unknown types, actual
+     tool bindings, and A2A policy collection without invoking data-plane APIs.
+   - Through the real catalog/dispatch path, test both token-validation policies,
+     inherited/fragment validators, confirmed absence, subscription-key-only and
+     backend-managed-identity-only cases, branch gaps, broken inheritance,
+     unavailable policies, non-MCP applicability, waivers and severity overrides.
+   - Exercise offline `analyze -> report` and mocked `assess` replay; confirm
+     identities, policy evidence, findings, scores and report coverage agree.
+     Run configured lint, formatting, typing, tests, package and container checks.
+   - Run a separately identified live smoke test only on authorized targets;
+     report unavailable A2A examples honestly rather than synthesizing live
+     evidence. Never commit live artifacts or create/modify assessed resources.
+   - No release, resource remediation, general MCP client, A2A task runner,
+     prompt-injection scanner or unrelated catalog expansion.
+
+**Microsoft grounding (reverify when implementing):**
+- [MCP resource model and management API](https://learn.microsoft.com/en-us/azure/api-management/manage-mcp-servers-rest-api)
+- [MCP capabilities and limitations](https://learn.microsoft.com/en-us/azure/api-management/mcp-server-overview)
+- [Secure inbound and outbound MCP access](https://learn.microsoft.com/en-us/azure/api-management/secure-mcp-servers)
+- [A2A API capabilities and policy scope](https://learn.microsoft.com/en-us/azure/api-management/agent-to-agent-api)
+- [Validate JWT policy](https://learn.microsoft.com/en-us/azure/api-management/validate-jwt-policy)
+- [Validate Microsoft Entra token policy](https://learn.microsoft.com/en-us/azure/api-management/validate-azure-ad-token-policy)
 
 ---
 
