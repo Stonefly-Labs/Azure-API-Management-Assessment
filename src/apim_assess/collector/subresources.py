@@ -324,11 +324,17 @@ class SubresourceCollector:
 
     def project(self, entity: _Entity, kind: Kind, workspace: str | None) -> SubResource | None:
         path = entity.id[len(self.identifier) + 1 :]
+        display_name = entity.properties.get("displayName") if kind == "named_value" else None
+        name = (
+            display_name.strip()
+            if isinstance(display_name, str) and display_name.strip()
+            else path.rsplit("/", 1)[-1]
+        )
         try:
             item = SubResource(
                 resource_id=entity.id,
                 path=path,
-                name=path.rsplit("/", 1)[-1],
+                name=name,
                 kind=kind,
                 workspace=workspace,
                 metadata=_metadata(kind, entity.properties),
