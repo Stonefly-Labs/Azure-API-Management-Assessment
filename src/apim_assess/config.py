@@ -100,7 +100,7 @@ class AiEnrichment(Model):
 
 
 class Telemetry(Model):
-    lookback_days: int = Field(default=14, ge=1, le=30)
+    lookback_days: int = Field(default=30, ge=1, le=30)
     kql_max_rows: int = Field(default=5, ge=1, le=100)
     kql_timeout_seconds: int = Field(default=30, ge=1, le=180)
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
+from typing import Literal
 from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -9,7 +11,13 @@ from apim_assess.collector.client import ArmReader, AzureReadError, linked_resou
 from apim_assess.collector.governance import WORKSPACE_TYPE, LogLink
 from apim_assess.collector.sanitizer import reference_id
 from apim_assess.config import Telemetry
-from apim_assess.models.adjacent import LogAggregate, LogAnalytics, LogHotspot, WorkspaceLogs
+from apim_assess.models.adjacent import (
+    LogAggregate,
+    LogAnalytics,
+    LogHotspot,
+    LogLatency,
+    WorkspaceLogs,
+)
 from apim_assess.models.snapshot import (
     CollectionWarning,
     Instance,
@@ -22,6 +30,8 @@ METRICS_API_VERSION = "2018-01-01"
 CLASSIC = {"Developer", "Basic", "Standard", "Premium"}
 V2 = {"BasicV2", "StandardV2", "PremiumV2"}
 METRIC_NAMES = ("Capacity", "CpuPercent_Gateway", "MemoryPercent_Gateway", "Requests", "Duration")
+TOP_APIS = 5
+Dimension = Literal["Location", "GatewayResponseCodeCategory", "ApiId"]
 
 
 class _Name(BaseModel):
@@ -53,6 +63,29 @@ class _Response(BaseModel):
     value: list[_Metric]
 
 
+def dimensions_for(series: _Series, dimension: Dimension | None) -> dict[Dimension, str]:
+    if dimension is None:
+        if series.metadatavalues:
+            raise AzureReadError("UNEXPECTED_METRIC_DIMENSIONS")
+        return {}
+    if (
+        len(series.metadatavalues) != 1
+        or series.metadatavalues[0].name.value.casefold() != dimension.casefold()
+    ):
+        raise AzureReadError("MISSING_METRIC_DIMENSION")
+    value = series.metadatavalues[0].value
+    if dimension == "ApiId":
+        value = reference_id(value.casefold())
+    elif dimension == "Location":
+        if not re.fullmatch(r"[a-zA-Z0-9 -]{1,80}", value):
+            raise AzureReadError("INVALID_METRIC_LOCATION")
+    else:
+        value = value.casefold()
+        if value not in {"1xx", "2xx", "3xx", "4xx", "5xx", "other", "unknown"}:
+            raise AzureReadError("INVALID_METRIC_CATEGORY")
+    return {dimension: value}
+
+
 def metric_status(name: str, sku: str | None) -> SignalStatus:
     if sku is None or sku not in CLASSIC | V2 | {"Consumption"}:
         return "unavailable"
@@ -73,9 +106,24 @@ async def collect_metrics(
     enabled: bool,
 ) -> list[MetricSeries]:
     results: list[MetricSeries] = []
-    for name in METRIC_NAMES:
-        empty = MetricSeries.model_validate({"name": name, "status": "unavailable"})
-        status = metric_status(name, instance.sku.name if instance.sku else None)
+    queries: list[tuple[str, Dimension | None]] = [
+        (name, "Location" if name in {"Capacity", "Requests", "Duration"} else None)
+        for name in METRIC_NAMES
+    ] + [
+        ("Requests", "GatewayResponseCodeCategory"),
+        ("Requests", "ApiId"),
+        ("BackendDuration", "ApiId"),
+    ]
+    sku = instance.sku.name if instance.sku else None
+    for name, dimension in queries:
+        empty = MetricSeries.model_validate(
+            {
+                "name": name,
+                "status": "unavailable",
+                "dimensions": {dimension: "*"} if dimension else {},
+            }
+        )
+        status = metric_status(name, sku)
         if status == "unsupported":
             results.append(empty.model_copy(update={"status": "unsupported"}))
             continue
@@ -83,13 +131,17 @@ async def collect_metrics(
             results.append(empty)
             continue
         aggregation = "Total" if name == "Requests" else "Average"
-        if name in {"CpuPercent_Gateway", "MemoryPercent_Gateway", "Duration"}:
+        if name in {
+            "CpuPercent_Gateway",
+            "MemoryPercent_Gateway",
+            "Duration",
+            "BackendDuration",
+        } or (name == "Capacity" and sku == "Premium"):
             aggregation += ",Maximum"
         # Monitor's query decoding can turn numeric UTC offsets into invalid intervals.
         timespan = "/".join(
             instant.astimezone(UTC).isoformat().replace("+00:00", "Z") for instant in (start, end)
         )
-        # Classic Capacity maximum is not supported outside Premium and is not a scaling signal.
         params = {
             "api-version": METRICS_API_VERSION,
             "metricnames": name,
@@ -97,44 +149,58 @@ async def collect_metrics(
             "interval": "PT1H",
             "aggregation": aggregation,
         }
-        if name in {"Capacity", "Requests", "Duration"}:
-            params["$filter"] = "Location eq '*'"
+        if dimension:
+            params["$filter"] = f"{dimension} eq '*'"
+            params["top"] = str(TOP_APIS if dimension == "ApiId" else 100)
+        if dimension == "ApiId":
+            params["orderby"] = "Total desc" if name == "Requests" else "Maximum desc"
+        query_label = f"{name} / {dimension or 'service'}"
         path = quote(instance.resource_id, safe="/") + "/providers/Microsoft.Insights/metrics"
         try:
             response = _Response.model_validate(await reader.get(path, params))
             series_results: list[MetricSeries] = []
+            seen: set[tuple[tuple[Dimension, str], ...]] = set()
             for metric in response.value:
                 if metric.name.value != name or metric.errorCode not in {None, "Success", ""}:
                     raise AzureReadError("METRIC_QUERY_FAILED")
+                expected_unit = (
+                    "Count"
+                    if name == "Requests"
+                    else "MilliSeconds"
+                    if name in {"Duration", "BackendDuration"}
+                    else "Percent"
+                )
+                if metric.unit != expected_unit:
+                    raise AzureReadError("INVALID_METRIC_UNIT")
+                if len(metric.timeseries) > int(params.get("top", "100")):
+                    raise AzureReadError("METRIC_SERIES_LIMIT_EXCEEDED")
                 for series in metric.timeseries:
+                    dimensions = dimensions_for(series, dimension)
+                    key = tuple(sorted(dimensions.items()))
+                    if key in seen:
+                        raise AzureReadError("DUPLICATE_METRIC_SERIES")
+                    seen.add(key)
                     points = [
                         MetricPoint.model_validate(point.model_dump())
                         for point in series.data
                         if start <= point.timestamp < end
                         and any(
-                            value is not None
-                            for value in (point.average, point.maximum, point.total)
+                            getattr(point, field.lower()) is not None
+                            for field in aggregation.split(",")
                         )
                     ]
                     if not points:
                         continue
                     if len({point.timestamp for point in points}) != len(points):
                         raise AzureReadError("DUPLICATE_METRIC_TIMESTAMPS")
-                    location = next(
-                        (
-                            dim.value
-                            for dim in series.metadatavalues
-                            if dim.name.value.casefold() == "location"
-                        ),
-                        None,
-                    )
                     series_results.append(
                         empty.model_copy(
                             update={
                                 "status": "available",
-                                "location": location,
+                                "location": dimensions.get("Location"),
+                                "dimensions": dimensions,
                                 "unit": metric.unit,
-                                "points": points,
+                                "points": sorted(points, key=lambda point: point.timestamp),
                             }
                         )
                     )
@@ -142,14 +208,20 @@ async def collect_metrics(
                 raise AzureReadError("NO_METRIC_DATA")
             results.extend(series_results)
             expected = int((end - start).total_seconds() // 3600)
-            if any(len(series.points) != expected for series in series_results):
+            if any(
+                sum(getattr(point, field.lower()) is not None for point in series.points)
+                != expected
+                for series in series_results
+                for field in aggregation.split(",")
+            ):
                 warnings.append(
                     CollectionWarning(
                         module="metrics",
                         resource_id=instance.resource_id,
                         code="PARTIAL_METRIC_DATA",
                         message=(
-                            f"{name} has incomplete hourly coverage; missing samples are not zero."
+                            f"{query_label} has incomplete hourly coverage; "
+                            "missing samples are not zero."
                         ),
                     )
                 )
@@ -160,7 +232,7 @@ async def collect_metrics(
                     module="metrics",
                     resource_id=instance.resource_id,
                     code=str(exc) if isinstance(exc, AzureReadError) else "INVALID_RESPONSE",
-                    message=f"{name} could not be collected; it is not a healthy zero.",
+                    message=f"{query_label} could not be collected; it is not a healthy zero.",
                 )
             )
     if not enabled:
@@ -261,7 +333,13 @@ data | summarize gateway_5xx=countif(response between (500 .. 599)),
 | where gateway_5xx > 0 or backend_5xx > 0
 | order by backend_5xx desc, gateway_5xx desc
 | take {max_rows}
-| project api, gateway_5xx, backend_5xx
+| project api, gateway_5xx, backend_5xx;
+data | where latency >= 0 and backend between (100 .. 599)
+| summarize samples=count(), average_ms=avg(latency), maximum_ms=max(latency),
+    p95_ms=percentile(latency, 95) by api
+| order by samples desc, api asc
+| take {max_rows}
+| project api, samples, average_ms, maximum_ms, p95_ms
 """.strip()
 
 
@@ -272,6 +350,21 @@ def table_rows(table: _Table, expected: set[str]) -> list[dict[str, object]]:
     if any(len(row) != len(names) for row in table.rows):
         raise AzureReadError("INVALID_LOG_ROWS")
     return [dict(zip(names, row, strict=True)) for row in table.rows]
+
+
+def log_api_path(instance: Instance, api: str) -> str | None:
+    matches = (
+        [
+            item.path
+            for item in instance.inventory.resources
+            if item.kind == "api"
+            and item.workspace is None
+            and item.name.casefold() == api.casefold()
+        ]
+        if instance.inventory
+        else []
+    )
+    return matches[0] if len(matches) == 1 else None
 
 
 async def collect_logs(
@@ -324,7 +417,7 @@ async def collect_logs(
                     settings.kql_timeout_seconds,
                 )
             )
-            if len(response.tables) != 2:
+            if len(response.tables) != 3:
                 raise AzureReadError("INVALID_LOG_TABLES")
             rows = table_rows(response.tables[0], set(LogAggregate.model_fields))
             if len(rows) != 1:
@@ -338,24 +431,32 @@ async def collect_logs(
                 api = row["api"]
                 if not isinstance(api, str):
                     raise AzureReadError("INVALID_LOG_API")
-                matches = (
-                    [
-                        item.path
-                        for item in instance.inventory.resources
-                        if item.kind == "api"
-                        and item.workspace is None
-                        and item.name.casefold() == api.casefold()
-                    ]
-                    if instance.inventory
-                    else []
-                )
                 hotspots.append(
                     LogHotspot.model_validate(
                         {
                             "api_reference": reference_id(api.casefold()),
-                            "api_path": matches[0] if len(matches) == 1 else None,
+                            "api_path": log_api_path(instance, api),
                             "gateway_5xx": row["gateway_5xx"],
                             "backend_5xx": row["backend_5xx"],
+                        }
+                    )
+                )
+            latency_rows = table_rows(
+                response.tables[2], {"api", "samples", "average_ms", "maximum_ms", "p95_ms"}
+            )
+            if len(latency_rows) > settings.kql_max_rows:
+                raise AzureReadError("LOG_ROW_LIMIT_EXCEEDED")
+            api_latency = []
+            for row in latency_rows:
+                api = row.pop("api")
+                if not isinstance(api, str):
+                    raise AzureReadError("INVALID_LOG_API")
+                api_latency.append(
+                    LogLatency.model_validate(
+                        {
+                            **row,
+                            "api_reference": reference_id(api.casefold()),
+                            "api_path": log_api_path(instance, api),
                         }
                     )
                 )
@@ -365,6 +466,7 @@ async def collect_logs(
                 status="complete",
                 aggregate=aggregate,
                 hotspots=hotspots,
+                api_latency=api_latency,
             )
         except (AzureReadError, ValidationError) as exc:
             result.status = "partial"

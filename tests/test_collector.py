@@ -9,6 +9,7 @@ from azure.core.credentials import AccessToken
 from apim_assess.analyzer.engine import analyze
 from apim_assess.collector.apim_core import collect
 from apim_assess.collector.client import ARM, ArmReader, AzureReadError
+from apim_assess.collector.sanitizer import reference_id
 from apim_assess.config import AssessmentConfig
 
 ID = (
@@ -84,6 +85,32 @@ def exercise(handler, config):
     return asyncio.run(run())
 
 
+def metric_metadata(request):
+    dimension = request.url.params.get("$filter", "").split(" ")[0]
+    return (
+        [
+            {
+                "name": {"value": dimension},
+                "value": {
+                    "Location": "eastus",
+                    "GatewayResponseCodeCategory": "2xx",
+                    "ApiId": SECRET,
+                }[dimension],
+            }
+        ]
+        if dimension
+        else []
+    )
+
+
+def metric_unit(name):
+    return (
+        "Count"
+        if name == "Requests"
+        else ("MilliSeconds" if name in {"Duration", "BackendDuration"} else "Percent")
+    )
+
+
 def test_collection_projects_safe_metadata_and_queries_only_gets():
     requests = []
     point_time = datetime.now(UTC).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
@@ -103,12 +130,10 @@ def test_collection_projects_safe_metadata_and_queries_only_gets():
                     "value": [
                         {
                             "name": {"value": name},
-                            "unit": "Count" if name == "Requests" else "Percent",
+                            "unit": metric_unit(name),
                             "timeseries": [
                                 {
-                                    "metadatavalues": [
-                                        {"name": {"value": "Location"}, "value": "eastus"}
-                                    ],
+                                    "metadatavalues": metric_metadata(request),
                                     "data": [
                                         {
                                             "timeStamp": point_time.isoformat(),
@@ -132,12 +157,13 @@ def test_collection_projects_safe_metadata_and_queries_only_gets():
     assert instance.identity_type == "SystemAssigned"
     assert len(instance.custom_properties) == 1
     assert instance.environment == "prod"
-    assert len(instance.metrics) == 5
+    assert len(instance.metrics) == 8
     metric_requests = [request for request in requests if request.url.path.endswith("/metrics")]
     assert {request.url.params["metricnames"] for request in metric_requests} == {
         "Capacity",
         "Requests",
         "Duration",
+        "BackendDuration",
     }
     assert (
         next(
@@ -150,6 +176,20 @@ def test_collection_projects_safe_metadata_and_queries_only_gets():
     assert {
         warning.code for warning in snapshot.collection_warnings if warning.module == "metrics"
     } == {"PARTIAL_METRIC_DATA"}
+    by_split = {
+        (request.url.params["metricnames"], request.url.params.get("$filter")): request.url.params
+        for request in metric_requests
+    }
+    assert by_split["Capacity", "Location eq '*'"]["aggregation"] == "Average,Maximum"
+    assert by_split["Requests", "ApiId eq '*'"]["top"] == "5"
+    assert by_split["Requests", "ApiId eq '*'"]["orderby"] == "Total desc"
+    assert by_split["BackendDuration", "ApiId eq '*'"]["aggregation"] == "Average,Maximum"
+    assert by_split["BackendDuration", "ApiId eq '*'"]["orderby"] == "Maximum desc"
+    assert any(
+        series.dimensions.get("ApiId") == reference_id(SECRET.casefold())
+        for series in instance.metrics
+    )
+    assert snapshot.telemetry_end - snapshot.telemetry_start == timedelta(days=30)
 
 
 def test_v2_does_not_query_zero_returning_classic_metric():
@@ -163,7 +203,13 @@ def test_v2_does_not_query_zero_returning_classic_metric():
 
     config = AssessmentConfig.model_validate({"targets": {"instances": [{"resource_id": ID}]}})
     snapshot = exercise(handler, config)
-    assert set(names) == {"CpuPercent_Gateway", "MemoryPercent_Gateway", "Requests", "Duration"}
+    assert set(names) == {
+        "CpuPercent_Gateway",
+        "MemoryPercent_Gateway",
+        "Requests",
+        "Duration",
+        "BackendDuration",
+    }
     assert next(
         item for item in snapshot.instances[0].metrics if item.name == "Capacity"
     ).status == ("unsupported")
@@ -172,6 +218,130 @@ def test_v2_does_not_query_zero_returning_classic_metric():
         for warning in snapshot.collection_warnings
         if warning.module == "metrics"
     )
+
+
+@pytest.mark.parametrize("sku", ["Developer", "Basic", "Standard"])
+def test_classic_non_premium_capacity_never_requests_zero_returning_maximum(sku):
+    queries = []
+
+    def handler(request):
+        if request.url.path.endswith("/metrics"):
+            queries.append(request.url.params)
+            return httpx.Response(200, json={"value": []})
+        return httpx.Response(200, json=service(sku=sku))
+
+    exercise(
+        handler, AssessmentConfig.model_validate({"targets": {"instances": [{"resource_id": ID}]}})
+    )
+    assert (
+        next(query for query in queries if query["metricnames"] == "Capacity")["aggregation"]
+        == "Average"
+    )
+    assert not any(
+        query["metricnames"] in {"CpuPercent_Gateway", "MemoryPercent_Gateway"} for query in queries
+    )
+
+
+@pytest.mark.parametrize(
+    ("failure", "code"),
+    [
+        ("denied", "HTTP_403"),
+        ("no_dimension", "MISSING_METRIC_DIMENSION"),
+        ("too_many", "METRIC_SERIES_LIMIT_EXCEEDED"),
+        ("duplicate", "DUPLICATE_METRIC_SERIES"),
+        ("wrong_unit", "INVALID_METRIC_UNIT"),
+    ],
+)
+def test_failed_dimensional_query_does_not_discard_other_splits_or_leak_data(failure, code):
+    timestamp = datetime.now(UTC).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
+
+    def handler(request):
+        if not request.url.path.endswith("/metrics"):
+            return httpx.Response(200, json=service())
+        name = request.url.params["metricnames"]
+        dimension = request.url.params.get("$filter", "").split(" ")[0]
+        data = [{"timeStamp": timestamp.isoformat(), "average": 25, "maximum": 50, "total": 10}]
+        series = {"metadatavalues": metric_metadata(request), "data": data}
+        body = {"name": {"value": name}, "unit": metric_unit(name), "timeseries": [series]}
+        if name == "Requests" and dimension == "ApiId":
+            if failure == "denied":
+                return httpx.Response(403, json={"error": {"message": SECRET}})
+            if failure == "no_dimension":
+                series["metadatavalues"] = []
+            elif failure == "too_many":
+                body["timeseries"] = [series] * 6
+            elif failure == "duplicate":
+                body["timeseries"] = [series] * 2
+            elif failure == "wrong_unit":
+                body["unit"] = SECRET
+        return httpx.Response(200, json={"value": [body]})
+
+    snapshot = exercise(
+        handler, AssessmentConfig.model_validate({"targets": {"instances": [{"resource_id": ID}]}})
+    )
+    metrics = snapshot.instances[0].metrics
+    assert (
+        next(
+            series
+            for series in metrics
+            if series.name == "Requests" and "ApiId" in series.dimensions
+        ).status
+        == "unavailable"
+    )
+    assert (
+        next(
+            series
+            for series in metrics
+            if series.name == "Requests" and "GatewayResponseCodeCategory" in series.dimensions
+        ).status
+        == "available"
+    )
+    assert (
+        next(series for series in metrics if series.name == "BackendDuration").status == "available"
+    )
+    assert any(warning.code == code for warning in snapshot.collection_warnings)
+    assert SECRET not in snapshot.model_dump_json()
+
+
+def test_missing_maxima_remain_partial_even_with_every_hour_present():
+    def handler(request):
+        if not request.url.path.endswith("/metrics"):
+            return httpx.Response(200, json=service())
+        name = request.url.params["metricnames"]
+        start = datetime.fromisoformat(request.url.params["timespan"].split("/")[0])
+        points = [
+            {
+                "timeStamp": (start + timedelta(hours=index)).isoformat(),
+                ("total" if name == "Requests" else "average"): 10,
+            }
+            for index in range(24)
+        ]
+        return httpx.Response(
+            200,
+            json={
+                "value": [
+                    {
+                        "name": {"value": name},
+                        "unit": metric_unit(name),
+                        "timeseries": [
+                            {"metadatavalues": metric_metadata(request), "data": points}
+                        ],
+                    }
+                ]
+            },
+        )
+
+    snapshot = exercise(
+        handler,
+        AssessmentConfig.model_validate(
+            {"targets": {"instances": [{"resource_id": ID}]}, "telemetry": {"lookback_days": 1}}
+        ),
+    )
+    warnings = [warning for warning in snapshot.collection_warnings if warning.module == "metrics"]
+    assert {warning.code for warning in warnings} == {"PARTIAL_METRIC_DATA"}
+    assert all("Requests /" not in warning.message for warning in warnings)
+    assert any("Capacity / Location" in warning.message for warning in warnings)
+    assert any("BackendDuration / ApiId" in warning.message for warning in warnings)
 
 
 def test_permission_failure_is_preserved_without_response_body():
@@ -195,6 +365,7 @@ def test_duplicate_metric_samples_become_structured_warnings():
         point = {
             "timeStamp": timestamp.isoformat(),
             "average": 30,
+            "total": 30,
             "minimum": 0,
             "private_payload": SECRET,
         }
@@ -204,8 +375,10 @@ def test_duplicate_metric_samples_become_structured_warnings():
                 "value": [
                     {
                         "name": {"value": request.url.params["metricnames"]},
-                        "unit": "Percent",
-                        "timeseries": [{"data": [point, point]}],
+                        "unit": metric_unit(request.url.params["metricnames"]),
+                        "timeseries": [
+                            {"metadatavalues": metric_metadata(request), "data": [point, point]}
+                        ],
                     }
                 ]
             },

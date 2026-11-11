@@ -1,10 +1,14 @@
+from datetime import timedelta, timezone
 from html.parser import HTMLParser
 
 import pytest
 
 from apim_assess.analyzer.engine import analyze
-from apim_assess.models.findings import Evidence
+from apim_assess.artifacts import digest
+from apim_assess.models.adjacent import LogAggregate, LogAnalytics, LogLatency, WorkspaceLogs
+from apim_assess.models.findings import Evidence, Thresholds
 from apim_assess.models.policy import PolicyCoverage
+from apim_assess.models.snapshot import MetricPoint, MetricSeries
 from apim_assess.reporting.generator import (
     confidence,
     evidence_patterns,
@@ -13,6 +17,7 @@ from apim_assess.reporting.generator import (
     policy_summary,
     render,
 )
+from apim_assess.reporting.trends import daily_points, telemetry_charts
 
 
 class ReportParser(HTMLParser):
@@ -55,7 +60,7 @@ def test_self_contained_multi_instance_deck(snapshot):
     parser.feed(html)
     assert parser.external_runtime == []
     assert len(parser.options) == 4
-    assert parser.svg_count == 6  # portfolio plus individual views
+    assert parser.svg_count == 8  # topology plus observed capacity in portfolio/instance
     for instance in snapshot.instances:
         assert instance.resource_id in html
     for result in assessment.findings:
@@ -217,3 +222,162 @@ def test_policy_api_rollups_preserve_distinct_product_and_operation_contexts():
     assert summary[0]["rows"] == rows
     assert summary[0]["counts"]["jwt"] == {"present": 2, "unknown": 1}
     assert summary[0]["counts"]["rate_limit"] == {"absent": 3}
+
+
+def test_daily_rollups_preserve_missing_days_zeroes_and_aggregation(dimensional_snapshot):
+    series = dimensional_snapshot.instances[0].metrics[0]
+    averages = daily_points(series, "average", dimensional_snapshot)
+    maxima = daily_points(series, "maximum", dimensional_snapshot)
+    requests = daily_points(
+        dimensional_snapshot.instances[0].metrics[1], "total", dimensional_snapshot
+    )
+    assert len(averages) == 30
+    assert (averages[0]["value"], averages[0]["hours"], averages[0]["expected"]) == (20, 2, 24)
+    assert maxima[0]["value"] == 80
+    assert requests[0]["value"] == 40
+    assert averages[1]["value"] is None and averages[1]["hours"] == 0
+    assert averages[2]["value"] == 0 and averages[2]["hours"] == 1
+    # Missing days separate polylines instead of inventing an interpolation.
+    chart = telemetry_charts(dimensional_snapshot.instances, dimensional_snapshot, Thresholds())[0]
+    assert len(chart["lines"][0]["segments"]) == 2
+    assert chart["lines"][0]["points"][1]["value"] is None
+
+
+def test_daily_rollups_use_utc_and_count_partial_window_edges(snapshot):
+    snapshot.telemetry_start += timedelta(hours=18)
+    snapshot.telemetry_end = snapshot.telemetry_start + timedelta(days=1)
+    series = MetricSeries(
+        name="Requests",
+        status="available",
+        unit="Count",
+        points=[
+            MetricPoint(
+                timestamp=(snapshot.telemetry_start + timedelta(hours=hour)).astimezone(
+                    timezone(timedelta(hours=8))
+                ),
+                total=value,
+            )
+            for hour, value in [(0, 3), (8, 7)]
+        ],
+    )
+    points = daily_points(series, "total", snapshot)
+    assert [(point["day"], point["value"], point["expected"]) for point in points] == [
+        ("2026-01-01", 3, 6),
+        ("2026-01-02", 7, 18),
+    ]
+
+
+def test_portfolio_trends_do_not_double_count_splits_or_average_instances(dimensional_snapshot):
+    charts = telemetry_charts(dimensional_snapshot.instances, dimensional_snapshot, Thresholds())
+    assert [len(chart["lines"]) for chart in charts] == [6, 4, 2, 4]
+    assert all(line["points"][0]["value"] == 40 for line in charts[1]["lines"])
+    assert all(line["points"][0]["value"] == 40 for line in charts[2]["lines"])
+    selected = telemetry_charts(
+        [dimensional_snapshot.instances[1]], dimensional_snapshot, Thresholds()
+    )
+    assert [len(chart["lines"]) for chart in selected] == [4, 2, 1, 2]
+    assert all(
+        dimensional_snapshot.instances[0].name not in line["label"]
+        for chart in selected
+        for line in chart["lines"]
+    )
+    assert charts[0]["references"][0]["value"] == 70
+    assert charts[0]["references"][1]["value"] == 85
+    assert charts[3]["references"][0]["value"] == 2000
+
+
+def test_dimensional_html_is_accessible_scoped_self_contained_and_escaped(dimensional_snapshot):
+    instance = dimensional_snapshot.instances[0]
+    instance.metrics[3].dimensions["GatewayResponseCodeCategory"] = (
+        "</text><img src=x onerror=alert(1)>"
+    )
+    assessment = analyze(dimensional_snapshot)
+    original = dimensional_snapshot.model_dump_json()
+    html = render(dimensional_snapshot, assessment)
+    parser = ReportParser()
+    parser.feed(html)
+    assert parser.external_runtime == []
+    assert len(parser.ids) == len(set(parser.ids))
+    assert parser.svg_count == 16  # 4 trend charts + topology for each of 3 scopes
+    assert "30-Day Telemetry &amp; Trends" in html
+    assert 'data-trend-toggle="trend-0-utilization-line-0"' in html
+    assert 'aria-controls="trend-0-utilization-line-0" aria-pressed="true"' in html
+    assert "<caption>Request volume by top APIs" in html
+    assert "2 / 24 (partial / gap)" in html
+    assert "&lt;/text&gt;&lt;img" in html and "<img src=x" not in html
+    assert "not request-weighted or p95" in html
+    assert dimensional_snapshot.model_dump_json() == original
+
+
+def test_legacy_and_unavailable_trends_never_render_healthy_zeroes(snapshot):
+    instance = snapshot.instances[0]
+    instance.metrics.append(
+        MetricSeries(name="Requests", dimensions={"ApiId": "*"}, status="unavailable")
+    )
+    charts = telemetry_charts(snapshot.instances, snapshot, Thresholds())
+    assert charts[1]["lines"] == charts[2]["lines"] == charts[3]["lines"] == []
+    assert any("unavailable; not a healthy zero" in note for note in charts[2]["notes"])
+    assert any("not collected" in note for note in charts[3]["notes"])
+    html = render(snapshot, analyze(snapshot))
+    assert "14-Day Telemetry &amp; Trends" in html
+    assert "Legacy snapshots may not contain dimensional telemetry" in html
+
+
+def test_optional_kql_latency_is_rendered_separately_and_absent_additions_are_omitted(snapshot):
+    snapshot.schema_version = "1.4"
+    aggregate = LogAggregate(
+        requests=10,
+        tls_known=10,
+        weak_tls=0,
+        response_known=10,
+        gateway_5xx=0,
+        backend_known=10,
+        backend_5xx=0,
+        latency_samples=10,
+        backend_p95_ms=250,
+        cache_hits=0,
+        cache_misses=0,
+    )
+    legacy = WorkspaceLogs(
+        workspace="legacy",
+        table="ApiManagementGatewayLogs",
+        status="complete",
+        aggregate=aggregate,
+    )
+    assert "api_latency" not in legacy.model_dump()
+    current = legacy.model_copy(
+        update={
+            "workspace": "current",
+            "api_latency": [
+                LogLatency(
+                    api_reference="<untrusted-api>",
+                    samples=10,
+                    average_ms=100,
+                    maximum_ms=300,
+                    p95_ms=250,
+                )
+            ],
+        }
+    )
+    snapshot.instances[0].log_analytics = LogAnalytics(
+        status="complete",
+        workspaces=[legacy, current],
+    )
+    html = render(snapshot, analyze(snapshot))
+    assert "Per-API latency not collected." in html
+    assert "Logged backend latency /" in html
+    assert "&lt;untrusted-api&gt;" in html and "<untrusted-api>" not in html
+    assert "not Azure Monitor time-series samples" in html
+    assert not telemetry_charts(snapshot.instances, snapshot, Thresholds())[3]["lines"]
+
+
+@pytest.mark.parametrize("version", ["1.0", "1.1", "1.2", "1.3", "1.4"])
+def test_absent_dimension_metadata_does_not_change_legacy_serialization(snapshot, version):
+    snapshot.schema_version = version
+    before = digest(snapshot)
+    data = snapshot.model_dump()
+    assert "dimensions" not in data["instances"][0]["metrics"][0]
+    snapshot.instances[0].metrics[0].dimensions = {"Location": "eastus"}
+    assert digest(snapshot) != before
+    snapshot.instances[0].metrics[0].dimensions = {}
+    assert digest(snapshot) == before

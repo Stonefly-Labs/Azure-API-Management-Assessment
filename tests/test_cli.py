@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 from apim_assess.cli import app
 from apim_assess.collector.apim_core import collect
 from apim_assess.collector.client import ArmReader
+from apim_assess.collector.sanitizer import reference_id
 from apim_assess.models.findings import PortfolioAssessment
 from apim_assess.models.snapshot import Snapshot
 
@@ -118,6 +119,156 @@ def test_assess_runs_real_mocked_collection_and_same_offline_stages(
     assert staged_findings.read_text() == (directory / "findings.json").read_text()
     assert requests
     assert (directory / "apim-assessment-report.html").exists()
+
+
+def test_dimensional_classic_v2_assess_and_offline_replay(tmp_path, monkeypatch, snapshot):
+    identifiers = [instance.resource_id for instance in snapshot.instances[:2]]
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        assert request.method == "GET"
+        if request.url.path.endswith("/metrics"):
+            name = request.url.params["metricnames"]
+            if name == "MemoryPercent_Gateway":
+                return httpx.Response(403, json={"error": {"message": "PRIVATE_METRIC_SENTINEL"}})
+            dimension = request.url.params.get("$filter", "").split(" ")[0]
+            start = request.url.params["timespan"].split("/")[0]
+            value = {
+                "Location": "eastus",
+                "ApiId": "orders",
+                "GatewayResponseCodeCategory": "2xx",
+            }.get(dimension)
+            return httpx.Response(
+                200,
+                json={
+                    "value": [
+                        {
+                            "name": {"value": name},
+                            "unit": "Count"
+                            if name == "Requests"
+                            else (
+                                "MilliSeconds"
+                                if name in {"Duration", "BackendDuration"}
+                                else "Percent"
+                            ),
+                            "timeseries": [
+                                {
+                                    "metadatavalues": [
+                                        {"name": {"value": dimension}, "value": value}
+                                    ]
+                                    if dimension
+                                    else [],
+                                    "data": [
+                                        {"timeStamp": start, "total": 12}
+                                        if name == "Requests"
+                                        else {"timeStamp": start, "average": 25, "maximum": 50}
+                                    ],
+                                }
+                            ],
+                        }
+                    ]
+                },
+            )
+        if request.url.path in identifiers:
+            return httpx.Response(
+                200,
+                json={
+                    "id": request.url.path,
+                    "location": "eastus",
+                    "sku": {
+                        "name": "Premium" if request.url.path == identifiers[0] else "StandardV2",
+                        "capacity": 2,
+                    },
+                    "properties": {
+                        "additionalLocations": [],
+                        "virtualNetworkType": "None",
+                        "privateEndpointConnections": [],
+                    },
+                },
+            )
+        if request.url.path.endswith("/policies/policy"):
+            return httpx.Response(404)
+        if request.url.path.endswith(("/tenant/access", "/portalsettings/signup")):
+            return httpx.Response(200, json={"properties": {"enabled": False}})
+        if request.url.path.endswith("/portalconfigs/default"):
+            return httpx.Response(200, json={"properties": {"signin": {"require": True}}})
+        return httpx.Response(200, json={"value": []})
+
+    async def mocked_collection(config):
+        credential = AsyncMock()
+        credential.get_token.return_value = AccessToken("synthetic-token", 9999999999)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await collect(config, ArmReader(credential, client))
+
+    def forbidden():
+        raise AssertionError("Offline replay must not create Azure credentials")
+
+    monkeypatch.setattr("apim_assess.cli.collect", mocked_collection)
+    monkeypatch.setattr("apim_assess.collector.apim_core.DefaultAzureCredential", forbidden)
+    config = tmp_path / "settings.yaml"
+    config.write_text("modules:\n  networking: false\n  defender_policy: false\n")
+    directory = tmp_path / "composed"
+    result = RUNNER.invoke(
+        app,
+        [
+            "assess",
+            "--resource-id",
+            identifiers[0],
+            "--resource-id",
+            identifiers[1],
+            "--config",
+            str(config),
+            "--output-dir",
+            str(directory),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    saved = Snapshot.model_validate_json((directory / "snapshot.json").read_text())
+    assert (saved.telemetry_end - saved.telemetry_start).days == 30
+    assert {instance.resource_id: instance.sku.name for instance in saved.instances} == {
+        identifiers[0]: "Premium",
+        identifiers[1]: "StandardV2",
+    }
+    assert all(
+        any(series.dimensions.get("ApiId") == reference_id("orders") for series in instance.metrics)
+        for instance in saved.instances
+    )
+    assert any(warning.code == "HTTP_403" for warning in saved.collection_warnings)
+    assert any(warning.code == "PARTIAL_METRIC_DATA" for warning in saved.collection_warnings)
+    assert "PRIVATE_METRIC_SENTINEL" not in (directory / "snapshot.json").read_text()
+    request_count = len(requests)
+    replay = tmp_path / "findings.json"
+    result = RUNNER.invoke(
+        app,
+        [
+            "analyze",
+            "--snapshot",
+            str(directory / "snapshot.json"),
+            "--output",
+            str(replay),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert replay.read_bytes() == (directory / "findings.json").read_bytes()
+    report = tmp_path / "report.html"
+    result = RUNNER.invoke(
+        app,
+        [
+            "report",
+            "--snapshot",
+            str(directory / "snapshot.json"),
+            "--findings",
+            str(replay),
+            "--output",
+            str(report),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert report.read_bytes() == (directory / "apim-assessment-report.html").read_bytes()
+    assert "30-Day Telemetry &amp; Trends" in report.read_text()
+    assert report.read_text().count('data-trend="latency"') == 3
+    assert len(requests) == request_count
 
 
 def test_no_readable_instance_saves_warning_snapshot_and_stops(snapshot, tmp_path, monkeypatch):

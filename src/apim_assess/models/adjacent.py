@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import AwareDatetime, Field, model_validator
+from pydantic import (
+    AwareDatetime,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
 from apim_assess.models.policy import PolicyModel
 
@@ -142,19 +148,42 @@ class LogHotspot(PolicyModel):
     backend_5xx: int = Field(ge=0)
 
 
+class LogLatency(PolicyModel):
+    api_reference: str
+    api_path: str | None = None
+    samples: int = Field(gt=0)
+    average_ms: float = Field(ge=0)
+    maximum_ms: float = Field(ge=0)
+    p95_ms: float = Field(ge=0)
+
+    @model_validator(mode="after")
+    def consistent_latency(self) -> LogLatency:
+        if self.average_ms > self.maximum_ms or self.p95_ms > self.maximum_ms:
+            raise ValueError("Inconsistent per-API latency aggregate")
+        return self
+
+
 class WorkspaceLogs(PolicyModel):
     workspace: str
     table: Literal["ApiManagementGatewayLogs", "AzureDiagnostics"]
     status: CoverageStatus = "unavailable"
     aggregate: LogAggregate | None = None
     hotspots: list[LogHotspot] = Field(default_factory=list)
+    api_latency: list[LogLatency] | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        data: dict[str, object] = handler(self)
+        if self.api_latency is None:
+            data.pop("api_latency", None)
+        return data
 
     @model_validator(mode="after")
     def consistent_status(self) -> WorkspaceLogs:
         if (self.status == "complete") != (self.aggregate is not None):
             raise ValueError("Only complete log queries may contain aggregates")
-        if self.aggregate is None and self.hotspots:
-            raise ValueError("Unavailable logs cannot contain hotspots")
+        if self.aggregate is None and (self.hotspots or self.api_latency is not None):
+            raise ValueError("Unavailable logs cannot contain per-API aggregates")
         return self
 
 
