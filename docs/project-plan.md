@@ -164,7 +164,7 @@ The hybrid rule engine ships with **45+ rules** mapped across the 5 WAF Pillars 
 > 3. Open a Pull Request to `main`, and
 > 4. **STOP IMMEDIATELY** and wait for human review, testing, and merge before starting the next Iteration.
 
-Rather than building all collectors, all 46 rules, and the report generator horizontally in isolation, execution follows a **vertical-slice (tracer-bullet) approach** across 5 distinct PR-gated phases:
+Rather than building all collectors, all rules, and the report generator horizontally in isolation, execution follows a **vertical-slice (tracer-bullet) approach** across 6 distinct PR-gated phases:
 
 ```text
 Phase / PR 1 (`feature/iter-1-steel-thread`)     ──► Live Auth + Basic APIM Config & Metrics + 5 Seed Rules + Minimal HTML Deck  [STOP & PR]
@@ -172,6 +172,7 @@ Phase / PR 2 (`feature/iter-2-policy-engine`)    ──► Sub-Resources + Sanit
 Phase / PR 3 (`feature/iter-3-waf-mcsb-catalog`) ──► Full 5-Pillar WAF & MCSB Rule Catalog + Deep-Dive Explorer & Policy Matrix  [STOP & PR]
 Phase / PR 4 (`feature/iter-4-adjacent-signals`) ──► VNet/NSG/PE + Log Analytics KQL + Defender/Policy/Autoscale Collectors      [STOP & PR]
 Phase / PR 5 (`feature/iter-5-waf-ai-gateway`)   ──► Optional AFD & AppGW Probes + AI Gateway Rules + LLM Narrative + Dockerfile [STOP & PR]
+Phase / PR 6 (`feature/iter-6-focused-report`)   ──► Focused HTML Readout + Grouped Evidence + Verification Gaps + Accessible Navigation [STOP & PR]
 ```
 
 ### Iteration 1: End-to-End "Steel Thread" MVP (Connect, Read Config/Metrics, Render HTML)
@@ -226,6 +227,48 @@ Phase / PR 5 (`feature/iter-5-waf-ai-gateway`)   ──► Optional AFD & AppGW 
    - Evaluate Azure OpenAI / LLM APIs for token rate limits (`APIM-AIGW-001`), Managed Identity (`APIM-AIGW-002`), backend pool circuit breakers (`APIM-AIGW-003`), token metrics (`APIM-AIGW-004`), and GraphQL validation (`APIM-AIGW-005`).
 3. **Executive Roadmap, Optional `--enrich-ai` Narrative & `Dockerfile`:**
    - Light up the Prioritized 30/60/90-Day Remediation Roadmap slide, optional Azure OpenAI narrative enrichment, and container image build.
+
+---
+
+### Iteration 6: Focused HTML Readout & Report Polish
+**Goal:** Adopt the layout and information hierarchy of the user-supplied
+`apim-assessment-focused.html` design reference after the human merge of
+Iteration 5 (#7). The reference is design input only: its embedded assessment
+data must not be copied into source, fixtures, or committed artifacts.
+
+1. **Focused default readout (`reporting/generator.py`, `report_deck.html.j2`):**
+   - Replace the slide-first default with seven tabs: Overview, Findings,
+     Verification gaps, Roadmap, MCSB controls, API policy coverage, and Method
+     & scope. Retain optional presentation navigation, fullscreen, and theme
+     switching; use the existing self-contained theme and system fonts.
+   - Show a bottom-line summary, outcome/confidence bar, severity-ranked
+     priorities, pillar health with explicit denominators, production-readiness
+     cautions, and compact instance inventory/topology/metric cards.
+2. **Rule-first findings & traceable evidence:**
+   - Group results by rule, retain each instance's assessed severity, outcome,
+     waiver, summary, references and evidence, and provide instance drill-down.
+   - Group identical evidence details without losing source/API provenance or
+     truncating affected items. Do not infer pass/fail from text tokens.
+   - Combine search, pillar, severity, MCSB, affected API and outcome filters;
+     match combined filters against the same instance result. Include presets,
+     visible counts, empty states and links from priorities/matrices to findings.
+3. **Honest verification & planning views:**
+   - Surface unknown/unsupported results even when another instance fails the
+     same rule. Show relevant collection warnings and no false green states.
+   - Exclude waivers from confirmed-issue priorities, roadmap and score
+     denominators; preserve waived outcomes and evidence for inspection.
+   - Summarize API policy coverage while preserving operation/product execution
+     contexts; retain MCSB mapping denominators and upstream/AI evidence limits.
+4. **Acceptance & boundaries:**
+   - Verify `analyze -> report` offline and mocked multi-instance `assess` replay,
+     including schema 1.0-1.4 compatibility, unchanged scores and artifacts.
+   - Add focused grouping/waiver/gap/escaping regressions and execute browser
+     checks for tab/preset/filter drill-down, scope changes, theme, presentation,
+     keyboard accessibility, narrow screens and print of the selected scope.
+   - Run configured lint, formatting, typing, tests and package build. Keep all
+     CSS/JS/SVG inline with no external runtime requests or unsafe HTML insertion.
+   - Report-only iteration: no new rules, collectors, AI calls, schema migration,
+     release, package publish, or live Azure collection is required.
 
 ---
 

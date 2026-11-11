@@ -84,8 +84,8 @@ No Azure access is required:
 
 The fixture intentionally contains unavailable/partial telemetry. N/A and
 unknown results are meaningful, not missing demo functionality. Open the
-HTML file locally; its portfolio/instance selector, eight slides, keyboard
-navigation, explorer and theme toggle need no external runtime assets. Learn reference
+HTML file locally; its portfolio/instance selector, seven focused tabs, optional
+presentation navigation, filters and theme toggle need no external runtime assets. Learn reference
 links are optional outbound navigation, not runtime dependencies.
 
 ## Assessment decisions and limits
@@ -134,7 +134,7 @@ All IDs above have the `APIM-` prefix. Defaults such as 100 KiB payloads,
 50% sampling and two scale units are assessment review heuristics, not
 universal Azure limits or mandatory architecture prescriptions.
 
-The explorer combines text search with pillar, severity, MCSB, affected API
+The Findings view combines text search with pillar, severity, MCSB, affected API
 and outcome filters. Scope selection switches portfolio/instance views;
 evidence/remediation drawers and policy/MCSB tabs remain entirely offline.
 Filters never change stored scores. MCSB rows aggregate **once per control
@@ -142,6 +142,28 @@ per instance**, fail for any unwaived failure, and warn for unknown,
 unsupported or waived checks. The assessed-mapping rate uses known pass/fail
 rows only; warnings and omitted future controls must accompany that rate.
 The APIM MCSB v1 baseline itself is flagged by Microsoft as potentially outdated.
+
+### Iteration 6: focused HTML readout
+
+The default report follows a compact, seven-tab layout: **Overview, Findings,
+Verification gaps, Roadmap, MCSB controls, API policy coverage, Method & scope**.
+Overview separates confirmed issues, passing checks and missing evidence, shows
+coverage beside pillar scores, and calls out non-production failures whose rule
+defaults are High/Critical in production.
+
+Findings are grouped by rule with per-instance results and exact evidence
+patterns. Expand a pattern to inspect every source/API reference; nothing is
+truncated. Combined filters must match the same instance result. Presets select
+confirmed issues, verification gaps, passes, or all results (including waivers).
+Gaps remain visible even when the same rule fails on another instance. Waivers
+are excluded from priorities, the roadmap and applicable score denominators.
+
+API summaries expand to operation/product execution contexts. Topology, metrics,
+collection coverage, upstream observations and AI limits remain inspectable.
+Presentation mode retains Previous/Next, arrow/Space navigation and fullscreen.
+Tab lists also support arrow keys and Home/End. Print/PDF includes all sections
+and evidence for the selected scope, independent of filters, then restores the
+interactive view. No new collection, analysis rules or artifact schema is added.
 
 Waivers require a justification and optionally an exact APIM resource ID.
 They retain original outcomes/evidence but are excluded from pillar scoring;
