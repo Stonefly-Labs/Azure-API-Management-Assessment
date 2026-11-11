@@ -162,6 +162,23 @@ svg { width: 100%; max-width: 600px; height: auto; }
 .node { fill: var(--cp-surface-soft); stroke: var(--cp-border-strong); }
 .edge { stroke: var(--cp-accent); stroke-width: 2; }
 svg text { fill: var(--cp-text); font-size: 15px; }
+.trend svg { max-width: none; }
+.trend svg text { font-size: 11px; }
+.trend-axis { stroke: var(--cp-border-strong); stroke-width: 1; }
+.trend-reference { stroke: var(--cp-warning); stroke-width: 1; stroke-dasharray: 5 4; }
+.trend-line { fill: none; stroke: currentColor; stroke-width: 2; }
+.trend-line circle { fill: var(--cp-surface); }
+.trend-line.trend-muted { display: none; }
+.trend-color-0, .trend .legend .trend-color-0 { color: var(--cp-accent); }
+.trend-color-1, .trend .legend .trend-color-1 { color: var(--cp-link); }
+.trend-color-2, .trend .legend .trend-color-2 { color: var(--cp-success); }
+.trend-color-3, .trend .legend .trend-color-3 { color: var(--cp-warning); }
+.trend-color-4, .trend .legend .trend-color-4 { color: var(--cp-danger); }
+.trend-color-5, .trend .legend .trend-color-5 { color: var(--cp-text-soft); }
+.trend .legend button { font-size: .75rem; text-align: left; padding: 4px 8px; }
+.trend .legend button[aria-pressed="false"] { text-decoration: line-through; }
+.trend-key { display: inline-block; width: 16px; border-top: 3px solid currentColor; margin-right: 4px; }
+.trend-notes { max-height: 120px; overflow-y: auto; }
 .foot { font-size: .8rem; color: var(--cp-text-muted); overflow-wrap: anywhere; }
 #presentation-nav { display: flex; justify-content: center; align-items: center; gap: 16px; padding: 16px; }
 .skip-link { position: absolute; top: -100px; left: 16px; padding: 8px; background: var(--cp-surface); z-index: 10; }
@@ -183,6 +200,9 @@ svg text { fill: var(--cp-text); font-size: 15px; }
   .finding { break-inside: auto; }
   .table-wrap { overflow: visible; }
   .grid { display: block; }
+  .trend-line.trend-muted { display: inline; }
+  .trend-notes { max-height: none; overflow: visible; }
+  .trend .legend button { border: 0; text-decoration: none; }
 }
 </style>
 </head>
@@ -280,6 +300,73 @@ svg text { fill: var(--cp-text); font-size: 15px; }
       {% for finding in watch.rows %}<tr><td>{{ open_rule(finding.rule.id, finding.rule.title, finding.resource_id) }}</td><td>{{ identities[finding.resource_id].name }}</td><td>{{ finding.severity }}</td><td>{{ finding.rule.severity }}</td></tr>{% endfor %}
       </tbody></table></div>
     </div>{% endif %}
+    <h2>{{ "%g" | format(telemetry_days) }}-Day Telemetry &amp; Trends</h2>
+    <p class="small muted">Saved window: {{ snapshot.telemetry_start.isoformat() }} to {{ snapshot.telemetry_end.isoformat() }}.
+      Daily UTC rollups of observed hourly samples. Missing samples are not zero; partial-day totals are incomplete.
+      Portfolio views overlay individual instances, never add overlapping splits. Use the legend buttons to toggle lines; exact values and coverage are in each data table.</p>
+    <div class="grid g2">
+    {% for chart in telemetry_charts(scope.instances, snapshot, rule_settings.thresholds) %}
+      {% set chart_id = "trend-" ~ s ~ "-" ~ chart.key %}
+      <article class="card trend" data-trend="{{ chart.key }}">
+        <h3 id="{{ chart_id }}-title">{{ chart.title }}</h3>
+        <p class="small muted" id="{{ chart_id }}-description">{{ chart.description }}</p>
+        {% if chart.lines %}
+        <svg viewBox="0 0 600 230" role="img" aria-labelledby="{{ chart_id }}-title {{ chart_id }}-description">
+          <title>{{ chart.title }} / {{ scope.title }}</title>
+          <desc>Daily values in {{ chart.unit }}. Breaks indicate missing days. Use the following table for exact values and hourly coverage.</desc>
+          <line class="trend-axis" x1="48" y1="30" x2="48" y2="190"></line>
+          <line class="trend-axis" x1="48" y1="190" x2="552" y2="190"></line>
+          <text x="4" y="24">{{ "%.1f" | format(chart.ceiling) }} {{ chart.unit }}</text>
+          <text x="20" y="194">0</text>
+          <text x="48" y="216">{{ chart.lines[0].points[0].day }}</text>
+          <text x="552" y="216" text-anchor="end">{{ chart.lines[0].points[-1].day }}</text>
+          {% for reference in chart.references %}
+          <line class="trend-reference" x1="48" y1="{{ reference.y }}" x2="552" y2="{{ reference.y }}"></line>
+          <text x="552" y="{{ reference.y - 4 }}" text-anchor="end">{{ reference.label }}</text>
+          {% endfor %}
+          {% for line in chart.lines %}
+          <g id="{{ chart_id }}-line-{{ loop.index0 }}" class="trend-line trend-color-{{ line.color }}">
+            <title>{{ line.label }}</title>
+            {% for segment in line.segments %}<polyline points="{{ segment }}" stroke-dasharray="{{ line.dash }}"></polyline>{% endfor %}
+            {% for point in line.points if point.value is not none %}
+            <circle cx="{{ point.x }}" cy="{{ point.y }}" r="3"><title>{{ line.label }} / {{ point.day }}: {{ "%.2f" | format(point.value) }} {{ chart.unit }} / {{ point.hours }} of {{ point.expected }} hourly samples</title></circle>
+            {% endfor %}
+          </g>
+          {% endfor %}
+        </svg>
+        <div class="legend" aria-label="Toggle chart lines">
+          {% for line in chart.lines %}<button type="button" class="trend-color-{{ line.color }}" data-trend-toggle="{{ chart_id }}-line-{{ loop.index0 }}" aria-controls="{{ chart_id }}-line-{{ loop.index0 }}" aria-pressed="true"><span class="trend-key" aria-hidden="true"></span>{{ line.label }}</button>{% endfor %}
+        </div>
+        <details><summary>Daily data &amp; hourly coverage</summary>
+          <div class="table-wrap"><table>
+            <caption>{{ chart.title }} / {{ scope.title }} / UTC. Missing values are not zero; averages are not request-weighted.</caption>
+            <thead><tr><th scope="col">Series</th><th scope="col">UTC day</th><th scope="col">Value ({{ chart.unit }})</th><th scope="col">Hourly samples</th></tr></thead>
+            <tbody>{% for line in chart.lines %}{% for point in line.points %}
+              <tr><th scope="row">{{ line.label }}</th><td>{{ point.day }}</td><td>{{ "%.2f" | format(point.value) if point.value is not none else "Not collected" }}</td><td>{{ point.hours }} / {{ point.expected }}{% if point.hours < point.expected %} (partial / gap){% endif %}</td></tr>
+            {% endfor %}{% endfor %}</tbody>
+          </table></div>
+        </details>
+        {% else %}<p class="empty">Not collected: no usable series for this panel. Legacy snapshots may not contain dimensional telemetry; unavailable data is not a healthy zero.</p>{% endif %}
+        {% if chart.notes %}<div class="trend-notes small muted">{% for note in chart.notes %}<p>{{ note }}</p>{% endfor %}</div>{% endif %}
+        {% if chart.key == "latency" %}
+          <details><summary>Optional KQL per-API latency supplement</summary>
+          <p class="small muted">Window aggregates of logged backend responses, bounded by configured KQL row limit. Workspaces/tables remain separate; these are not Azure Monitor time-series samples.</p>
+          {% for instance in scope.instances %}
+            {% if instance.log_analytics %}{% for workspace in instance.log_analytics.workspaces %}
+              <p class="small">{{ instance.name }} / {{ workspace.workspace }} / {{ workspace.table }}: {{ workspace.status }}</p>
+              {% if workspace.api_latency %}
+              <div class="table-wrap"><table><caption>Logged backend latency / {{ instance.name }}</caption><thead><tr><th>API</th><th>Samples</th><th>Average ms</th><th>Maximum ms</th><th>p95 ms</th></tr></thead><tbody>
+              {% for row in workspace.api_latency %}<tr><td>{{ row.api_path or row.api_reference }}</td><td>{{ row.samples }}</td><td>{{ "%.2f" | format(row.average_ms) }}</td><td>{{ "%.2f" | format(row.maximum_ms) }}</td><td>{{ "%.2f" | format(row.p95_ms) }}</td></tr>{% endfor %}
+              </tbody></table></div>
+              {% else %}<p class="small muted">{{ "No backend latency samples observed." if workspace.api_latency is not none else "Per-API latency not collected." }}</p>{% endif %}
+            {% else %}<p class="small muted">{{ instance.name }}: {{ instance.log_analytics.status }} / no workspace samples.</p>{% endfor %}
+            {% else %}<p class="small muted">{{ instance.name }}: Log Analytics not collected.</p>{% endif %}
+          {% endfor %}
+          </details>
+        {% endif %}
+      </article>
+    {% endfor %}
+    </div>
     <h2>Environments in scope</h2>
     <div class="grid g2">
     {% for instance in scope.instances %}<article class="card">
@@ -316,7 +403,7 @@ svg text { fill: var(--cp-text); font-size: 15px; }
         {% endfor %}{% endif %}
         <p class="small muted">Configuration, not reachability proof. No public IP link does not prove DDoS protection absent. Log counts describe recorded samples; workspaces/tables are not added together.</p>
         <div class="table-wrap"><table><thead><tr><th>Metric / region</th><th>Status</th><th>Samples</th><th>Mean hourly average</th><th>Peak maximum</th><th>Total</th></tr></thead><tbody>
-        {% for metric in metric_summary(instance) %}<tr><td>{{ metric.name }} / {{ metric.location }} ({{ metric.unit }})</td><td>{{ metric.status }}</td><td>{{ metric.samples }}</td><td>{{ metric.average }}</td><td>{{ metric.maximum }}</td><td>{{ metric.total }}</td></tr>{% else %}<tr><td colspan="6">No telemetry collected.</td></tr>{% endfor %}
+        {% for metric in metric_summary(instance) %}<tr><td>{{ metric.name }} / {{ metric.location }} ({{ metric.unit }}){% if metric.dimensions %}<br>{{ metric.dimensions }}{% endif %}</td><td>{{ metric.status }}</td><td>{{ metric.samples }}</td><td>{{ metric.average }}</td><td>{{ metric.maximum }}</td><td>{{ metric.total }}</td></tr>{% else %}<tr><td colspan="6">No telemetry collected.</td></tr>{% endfor %}
         </tbody></table></div>
       </details>
     </article>{% endfor %}
@@ -574,6 +661,12 @@ svg text { fill: var(--cp-text); font-size: 15px; }
     const button = event.target.closest("button");
     if (!button) return;
     const scope = activeScope();
+    if (button.dataset.trendToggle) {
+      const pressed = button.getAttribute("aria-pressed") !== "true";
+      button.setAttribute("aria-pressed", String(pressed));
+      document.getElementById(button.dataset.trendToggle).classList.toggle("trend-muted", !pressed);
+      return;
+    }
     if (button.dataset.view) { setView(button.dataset.view); return; }
     if (button.dataset.goto) { setView(button.dataset.goto, true); return; }
     if (button.dataset.preset) { preset(scope, button.dataset.preset); setView("findings", true); return; }

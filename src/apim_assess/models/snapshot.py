@@ -12,6 +12,8 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
     model_validator,
 )
 
@@ -99,11 +101,29 @@ class MetricPoint(Model):
 
 
 class MetricSeries(Model):
-    name: Literal["Capacity", "CpuPercent_Gateway", "MemoryPercent_Gateway", "Requests", "Duration"]
+    name: Literal[
+        "Capacity",
+        "CpuPercent_Gateway",
+        "MemoryPercent_Gateway",
+        "Requests",
+        "Duration",
+        "BackendDuration",
+    ]
     location: str | None = None
+    dimensions: dict[Literal["Location", "GatewayResponseCodeCategory", "ApiId"], str] = Field(
+        default_factory=dict
+    )
     status: SignalStatus
     unit: str | None = None
     points: list[MetricPoint] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        data: dict[str, object] = handler(self)
+        # Omit absent additions so historical snapshot digests remain replayable.
+        if not self.dimensions:
+            data.pop("dimensions", None)
+        return data
 
     @model_validator(mode="after")
     def consistent_status(self) -> MetricSeries:

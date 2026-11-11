@@ -23,8 +23,8 @@ modules:
     auto_discover: true
     resource_ids: []  # Explicit Microsoft.Network/applicationGateways IDs.
 telemetry:
-  lookback_days: 14
-  kql_max_rows: 5  # Maximum hashed API hotspot rows per workspace/table.
+  lookback_days: 30
+  kql_max_rows: 5  # Maximum rows in each API hotspot/latency result per workspace/table.
   kql_timeout_seconds: 30
 rules:
   # Waivers retain original outcomes/evidence, but are excluded from scoring.

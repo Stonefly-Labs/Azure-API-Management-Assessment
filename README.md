@@ -1,12 +1,14 @@
 # apim-assess
 
-Read-only Azure API Management assessment CLI. **Iterations 1-5**: core
+Read-only Azure API Management assessment CLI. **Iterations 1-8**: core
 configuration, Azure Monitor metrics, sanitized sub-resource inventory,
 effective XML policies, 54 deterministic rules, linked networking/governance
 metadata, optional aggregate Log Analytics queries, validated rule
 waivers/thresholds, and a self-contained HTML deck and deep-dive explorer
 with effective policy and partial MCSB coverage matrices, optional upstream
-WAF probes, LLM/GraphQL checks, a remediation roadmap and container packaging.
+WAF probes, LLM/GraphQL checks, a remediation roadmap and container packaging,
+focused report navigation, deep sanitized policy scans, and dimensional telemetry
+with inline SVG trend charts.
 
 ## Install
 
@@ -56,10 +58,12 @@ The source of the classification is recorded. Use explicit `--env prod`
 for a production gateway regardless of its SKU.
 
 `--no-metrics` records disabled telemetry; it never creates healthy zeroes.
-`--lookback-days` accepts 1-30 (default 14). Collection ends at the previous
-complete UTC hour. Requests use Total; Duration uses Average/Maximum;
-Capacity uses Average; v2 CPU/memory use Average/Maximum. Regional metrics
-are split by Location. Policy XML is structurally sanitized before saving.
+`--lookback-days` accepts 1-30 (default 30). Collection ends at the previous
+complete UTC hour. Requests use Total; Duration/BackendDuration use
+Average/Maximum; Capacity uses Average (also Maximum on classic Premium);
+v2 CPU/memory use Average/Maximum. Regional baseline metrics are split by
+Location; additional Requests queries split by status category and API, and
+BackendDuration by API. Policy XML is structurally sanitized before saving.
 Named Value contents (including non-secret values), backend credentials,
 certificate payloads, subscription keys, publisher contacts, arbitrary tags
 and raw response bodies are never persisted. URL values are classified, not
@@ -87,6 +91,44 @@ unknown results are meaningful, not missing demo functionality. Open the
 HTML file locally; its portfolio/instance selector, seven focused tabs, optional
 presentation navigation, filters and theme toggle need no external runtime assets. Learn reference
 links are optional outbound navigation, not runtime dependencies.
+
+### Iteration 8: dimensional telemetry and trend charts
+
+The Overview includes four inline SVG panels for gateway utilization, request
+volume by HTTP status code category, request volume by top APIs, and backend
+latency by API. Scope switching, keyboard-accessible legend toggles, light/dark
+themes, exact-value tables and print/PDF work without external runtime assets.
+The heading and UTC dates reflect the saved window, including shorter overrides
+and legacy artifacts; an old 14-day snapshot is never labeled as 30 days.
+
+Collection preserves the regional baseline series and adds separate dimensional
+queries. Request API series are bounded to the top five per instance by Total
+descending; backend latency series are bounded to five by Maximum descending.
+API dimension values are hashed before persistence and matched to known service
+API inventory paths for display when unambiguous. These bounded selections do
+not represent all API traffic, and the request and latency top-five sets can
+differ. No raw log rows, URLs or policy contents are added to telemetry.
+
+Charts use daily UTC sums of hourly request Totals, means of hourly utilization
+or latency Averages, and peaks of hourly Maxima. The means are not
+request-weighted or request-level p95. Portfolio views overlay per-instance
+series; they do not add overlapping Location, status and API splits. Missing days
+break lines; partial days retain observed values and hourly sample counts,
+never fabricated zeroes. Unavailable, unsupported, denied, disabled and legacy
+missing-dimensional evidence remains explicit. The reference lines use saved
+review thresholds (defaults 70% / 85% and 2,000 ms); charts do not change rules,
+findings or scores. Classic Capacity Maximum remains display-only.
+
+With `modules.log_analytics_kql: true`, an additional bounded per-API window
+aggregate provides logged backend latency sample counts, average, maximum and
+p95. It stays separate from Monitor trends and from other workspace/table
+samples. Missing log evidence is not a zero or an inferred metric datapoint.
+Snapshots `1.0`-`1.4` remain readable; absent optional additions preserve
+historical serialized fields and snapshot digests.
+
+Microsoft grounding: [APIM monitoring reference](https://learn.microsoft.com/en-us/azure/api-management/monitor-api-management-reference),
+[Monitor Metrics List API](https://learn.microsoft.com/en-us/rest/api/monitor/metrics/list),
+and [gateway log columns](https://learn.microsoft.com/en-us/azure/azure-monitor/reference/tables/apimanagementgatewaylogs).
 
 ## Assessment decisions and limits
 

@@ -831,6 +831,13 @@ def log_response(**changes):
                 ],
                 "rows": [[SECRET, 1, 1]],
             },
+            {
+                "columns": [
+                    {"name": name, "type": "real"}
+                    for name in ("api", "samples", "average_ms", "maximum_ms", "p95_ms")
+                ],
+                "rows": [[SECRET, 10, 100, 300, 250]],
+            },
         ]
     }
 
@@ -852,6 +859,8 @@ def test_opt_in_logs_are_scoped_aggregated_and_anonymized(adjacent_snapshot, tab
         assert f'where _ResourceId =~ "{instance.resource_id}"' in query
         assert "summarize requests=count()" in query
         assert "backend_p95_ms=percentile(" in query
+        assert "average_ms=avg(latency)" in query
+        assert "p95_ms=percentile(latency, 95) by api" in query
         assert "take 5" in query
         assert "Authorization" not in query
         assert "CallerIpAddress" not in query and "BackendUrl" not in query
@@ -878,6 +887,14 @@ def test_opt_in_logs_are_scoped_aggregated_and_anonymized(adjacent_snapshot, tab
     assert len(requests) == 2
     assert SECRET not in result.model_dump_json()
     assert result.workspaces[0].hotspots[0].api_reference == reference_id(SECRET.casefold())
+    latency = result.workspaces[0].api_latency[0]
+    assert latency.api_reference == reference_id(SECRET.casefold())
+    assert (latency.samples, latency.average_ms, latency.maximum_ms, latency.p95_ms) == (
+        10,
+        100,
+        300,
+        250,
+    )
     assert all(request.method == "GET" for request in requests)
 
 
@@ -921,6 +938,43 @@ def test_partial_or_malformed_logs_preserve_unknown(adjacent_snapshot, body):
     assert warnings
     assert SECRET not in instance.log_analytics.model_dump_json()
     assert SECRET not in "".join(warning.model_dump_json() for warning in warnings)
+
+
+def test_invalid_per_api_log_latency_is_a_structured_gap(adjacent_snapshot):
+    instance = adjacent_snapshot.instances[0]
+    instance.governance.diagnostics_status = "complete"
+    _, _, workspace = linked_ids(instance)
+    warnings = []
+    body = log_response()
+    body["tables"][2]["rows"][0][3] = 50  # Maximum below average and p95.
+
+    def handler(request):
+        return httpx.Response(
+            200,
+            json=(
+                {"properties": {"customerId": WORKSPACE_GUID}}
+                if request.url.host == "management.azure.com"
+                else body
+            ),
+        )
+
+    async def work(reader):
+        return await collect_logs(
+            reader,
+            instance,
+            [(workspace, "ApiManagementGatewayLogs")],
+            adjacent_snapshot.telemetry_start,
+            adjacent_snapshot.telemetry_end,
+            warnings,
+            Telemetry(),
+            enabled=True,
+        )
+
+    result = run_reader(handler, work)
+    assert result.status == "partial"
+    assert result.workspaces[0].api_latency is None
+    assert [warning.code for warning in warnings] == ["INVALID_LOG_RESPONSE"]
+    assert SECRET not in result.model_dump_json()
 
 
 def test_disabled_adjacent_modules_issue_no_network_requests(adjacent_snapshot):

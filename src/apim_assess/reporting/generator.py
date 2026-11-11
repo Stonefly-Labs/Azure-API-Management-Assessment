@@ -30,6 +30,7 @@ from apim_assess.models.findings import (
 )
 from apim_assess.models.policy import PolicyCoverage
 from apim_assess.models.snapshot import Instance, Snapshot
+from apim_assess.reporting.trends import telemetry_charts
 
 OUTCOMES = ("fail", "unknown", "unsupported", "pass", "waived", "not_applicable")
 SEVERITIES = ("Critical", "High", "Medium", "Low", "Advisory")
@@ -194,6 +195,9 @@ def metric_summary(instance: Instance) -> list[dict[str, str]]:
             {
                 "name": series.name,
                 "location": series.location or "service",
+                "dimensions": ", ".join(
+                    f"{name}={value}" for name, value in series.dimensions.items()
+                ),
                 "status": series.status,
                 "samples": str(len(series.points)),
                 "average": f"{sum(averages) / len(averages):.2f}" if averages else "Not collected",
@@ -344,6 +348,8 @@ def render(snapshot: Snapshot, assessment: PortfolioAssessment) -> str:
         snapshot=snapshot,
         scopes=scopes,
         metric_summary=metric_summary,
+        telemetry_charts=telemetry_charts,
+        telemetry_days=(snapshot.telemetry_end - snapshot.telemetry_start).total_seconds() / 86400,
         legacy=assessment.schema_version == "1.0",
         iteration={"1.0": "1", "1.1": "2", "1.2": "3", "1.3": "4", "1.4": "5"}[
             assessment.schema_version
