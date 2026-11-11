@@ -277,56 +277,102 @@ def backend_routes(view: EffectivePolicy) -> set[tuple[str | None, str]]:
     }
 
 
-def _policy_url_locations(view: EffectivePolicy) -> list[str]:
+def _resolve_url_locs(instance: Instance, node: PolicyNode, sec: str, suffix: str) -> list[str]:
+    scope = node.scope or "global"
+    base = f"{scope}/{sec}/{suffix}"
+    inventory = instance.inventory
+    if inventory is None:
+        return [base]
+    doc = next(
+        (
+            d
+            for d in (*inventory.policies.values(), *inventory.fragments.values())
+            if d.source == node.source
+        ),
+        inventory.policies.get(node.scope),
+    )
+    if doc is None or not doc.hardcoded_urls:
+        return [base]
+    candidates = (
+        {
+            f"{sec}/set-url",
+            f"{sec}/send-request/set-url",
+            f"{sec}/send-one-way-request/set-url",
+            "fragment/set-url",
+            "fragment/send-request/set-url",
+            "fragment/send-one-way-request/set-url",
+        }
+        if suffix == "set-url"
+        else {f"{sec}/{suffix}", f"fragment/{suffix}"}
+    )
+    matched: list[str] = []
+    for entry in doc.hardcoded_urls:
+        entry_path, sep, line_tag = entry.partition(":L")
+        if entry_path in candidates:
+            matched.append(f"{base}:L{line_tag}" if sep and line_tag else base)
+    return matched or [base]
+
+
+def _policy_url_locations(instance: Instance, view: EffectivePolicy) -> list[str]:
     def run(
-        nodes: list[PolicyNode], paths: list[tuple[str | None, bool]]
-    ) -> list[tuple[str | None, bool]]:
+        nodes: list[PolicyNode], paths: list[tuple[PolicyNode | None, bool]]
+    ) -> list[tuple[PolicyNode | None, bool]]:
         for node in nodes:
-            updated: list[tuple[str | None, bool]] = []
-            for loc, stopped in paths:
+            updated: list[tuple[PolicyNode | None, bool]] = []
+            for active_node, stopped in paths:
                 if stopped:
-                    updated.append((loc, True))
+                    updated.append((active_node, True))
                 elif node.tag == "set-backend-service":
                     reference = node.attributes.get("backend-id")
                     url = node.attributes.get("base-url")
-                    next_loc = (
-                        f"{node.scope or 'global'}/{node.section}/set-backend-service@base-url"
-                        if not reference and url == LITERAL_URL
-                        else None
-                    )
-                    updated.append((next_loc, False))
+                    next_node = node if not reference and url == LITERAL_URL else None
+                    updated.append((next_node, False))
                 elif node.tag == "choose":
                     branches = [
                         child for child in node.children if child.tag in {"when", "otherwise"}
                     ]
                     for branch in branches:
-                        updated.extend(run(branch.children, [(loc, False)]))
+                        updated.extend(run(branch.children, [(active_node, False)]))
                     if not any(branch.tag == "otherwise" for branch in branches):
-                        updated.append((loc, False))
+                        updated.append((active_node, False))
                 elif node.tag in {"limit-concurrency", "retry"}:
-                    updated.extend(run(node.children, [(loc, False)]))
+                    updated.extend(run(node.children, [(active_node, False)]))
                 elif node.tag in {"unresolved-policy", "unrecognized-policy"}:
-                    updated.extend([(None, True), (loc, False)])
+                    updated.extend([(None, True), (active_node, False)])
                 else:
-                    updated.append((loc, node.tag in {"forward-request", "return-response"}))
-            paths = list(dict.fromkeys(updated))
+                    updated.append(
+                        (active_node, node.tag in {"forward-request", "return-response"})
+                    )
+            deduped: list[tuple[PolicyNode | None, bool]] = []
+            seen_keys: set[tuple[int | None, bool]] = set()
+            for item_node, item_stopped in updated:
+                key = (id(item_node) if item_node is not None else None, item_stopped)
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    deduped.append((item_node, item_stopped))
+            paths = deduped
             if len(paths) > 128:
                 return [(None, True)]
         return paths
 
-    locations: list[str] = [
-        loc
-        for loc, _ in run(view.sections["inbound"] + view.sections["backend"], [(None, False)])
-        if loc is not None
-    ]
+    locations: list[str] = []
+    for active_node, _ in run(view.sections["inbound"] + view.sections["backend"], [(None, False)]):
+        if active_node is not None:
+            locations.extend(
+                _resolve_url_locs(
+                    instance,
+                    active_node,
+                    active_node.section or "inbound",
+                    "set-backend-service@base-url",
+                )
+            )
     for section, nodes in view.sections.items():
         for node in walk(nodes):
-            scope = node.scope or "global"
             sec = node.section or section
             if node.tag == "set-url" and node.text == LITERAL_URL:
-                locations.append(f"{scope}/{sec}/set-url")
+                locations.extend(_resolve_url_locs(instance, node, sec, "set-url"))
             elif node.tag == "rewrite-uri" and node.attributes.get("template") == LITERAL_URL:
-                locations.append(f"{scope}/{sec}/rewrite-uri@template")
+                locations.extend(_resolve_url_locs(instance, node, sec, "rewrite-uri@template"))
     return list(dict.fromkeys(locations))
 
 
@@ -334,7 +380,7 @@ def _backend(instance: Instance, view: EffectivePolicy) -> ControlState:
     inventory = instance.inventory
     if inventory is None or view.issues:
         return "unknown"
-    if _policy_url_locations(view):
+    if _policy_url_locations(instance, view):
         return "absent"
     backends = {
         (item.workspace, reference_id(item.name))
@@ -412,7 +458,7 @@ def evaluate(
         if check == "inheritance" and view.missing_base:
             detail += "; missing base: " + ", ".join(view.missing_base)
         elif check == "backend" and state == "absent":
-            url_locs = _policy_url_locations(view)
+            url_locs = _policy_url_locations(instance, view)
             if url_locs:
                 detail += "; hardcoded_urls=" + ", ".join(url_locs)
             elif view.service_url_kind == "literal":

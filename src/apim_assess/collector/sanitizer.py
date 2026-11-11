@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import re
+from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 from xml.etree import ElementTree as ET
 
 from defusedxml.common import DefusedXmlException
-from defusedxml.ElementTree import fromstring
+from defusedxml.ElementTree import DefusedXMLParser
 
 from apim_assess.models.policy import PolicyDocument
 
@@ -222,12 +223,45 @@ def _is_hardcoded_secret_value(raw: str) -> bool:
     return True
 
 
+class _LineTrackingBuilder(ET.TreeBuilder):
+    def __init__(self) -> None:
+        super().__init__()
+        self.expat: Any = None
+        self.lines: dict[int, int] = {}
+
+    def start(self, tag: str, attrs: dict[str, str]) -> ET.Element:
+        elem = super().start(tag, attrs)
+        if self.expat is not None:
+            self.lines[id(elem)] = int(self.expat.CurrentLineNumber)
+        return elem
+
+
+def _parse_xml_with_lines(xml: str) -> tuple[ET.Element, dict[int, int]]:
+    builder = _LineTrackingBuilder()
+    parser: Any = DefusedXMLParser(
+        target=builder,
+        forbid_dtd=True,
+        forbid_entities=True,
+        forbid_external=True,
+    )
+    builder.expat = getattr(parser, "parser", getattr(parser, "_parser", None))
+    parser.feed(xml)
+    root = parser.close()
+    if not isinstance(root, ET.Element):
+        raise ValueError("Invalid XML root")
+    return root, builder.lines
+
+
 def _scan_policy(
-    root: ET.Element, xml: str, *, fragment: bool
+    root: ET.Element, xml: str, lines: dict[int, int], *, fragment: bool
 ) -> tuple[list[str], list[str], list[str]]:
     secret_locations: list[str] = []
     hardcoded_urls: list[str] = []
     named_values: set[str] = set()
+
+    def _with_line(loc: str, node: ET.Element) -> str:
+        lineno = lines.get(id(node))
+        return f"{loc}:L{lineno}" if lineno is not None else loc
 
     def visit(node: ET.Element, section: str, parent_tag: str | None) -> None:
         current_section = (
@@ -241,33 +275,44 @@ def _scan_policy(
                 named_values.add(reference_id(match.group(1).casefold()))
 
         if node.tag == "set-backend-service" and has_literal_url(node.attrib.get("base-url", "")):
-            hardcoded_urls.append(f"{current_section}/set-backend-service@base-url")
+            hardcoded_urls.append(
+                _with_line(f"{current_section}/set-backend-service@base-url", node)
+            )
         elif node.tag == "set-url" and has_literal_url((node.text or "").strip()):
             prefix = (
                 f"{current_section}/{parent_tag}"
                 if parent_tag in {"send-request", "send-one-way-request"}
                 else current_section
             )
-            hardcoded_urls.append(f"{prefix}/set-url")
+            hardcoded_urls.append(_with_line(f"{prefix}/set-url", node))
         elif node.tag == "rewrite-uri" and has_literal_url(node.attrib.get("template", "")):
-            hardcoded_urls.append(f"{current_section}/rewrite-uri@template")
+            hardcoded_urls.append(_with_line(f"{current_section}/rewrite-uri@template", node))
 
         handled_value_children = False
         if node.tag == "authentication-basic" and _is_hardcoded_secret_value(
             node.attrib.get("password", "")
         ):
-            secret_locations.append(f"{current_section}/authentication-basic@password")
+            secret_locations.append(
+                _with_line(f"{current_section}/authentication-basic@password", node)
+            )
         elif (
             node.tag == "set-header"
             and node.attrib.get("exists-action", "").lower() != "delete"
             and node.attrib.get("name", "").strip().lower() in SENSITIVE_HEADERS
         ):
             hdr = node.attrib.get("name", "").strip().lower()
-            if any(
-                child.tag == "value" and _is_hardcoded_secret_value(child.text or "")
-                for child in node
-            ):
-                secret_locations.append(f"{current_section}/set-header[name={hdr}]")
+            val_child = next(
+                (
+                    child
+                    for child in node
+                    if child.tag == "value" and _is_hardcoded_secret_value(child.text or "")
+                ),
+                None,
+            )
+            if val_child is not None:
+                secret_locations.append(
+                    _with_line(f"{current_section}/set-header[name={hdr}]", val_child)
+                )
                 handled_value_children = True
         elif (
             node.tag == "set-query-parameter"
@@ -275,11 +320,18 @@ def _scan_policy(
             and node.attrib.get("name", "").strip().lower() in SENSITIVE_QUERY_PARAMS
         ):
             param = node.attrib.get("name", "").strip().lower()
-            if any(
-                child.tag == "value" and _is_hardcoded_secret_value(child.text or "")
-                for child in node
-            ):
-                secret_locations.append(f"{current_section}/set-query-parameter[name={param}]")
+            val_child = next(
+                (
+                    child
+                    for child in node
+                    if child.tag == "value" and _is_hardcoded_secret_value(child.text or "")
+                ),
+                None,
+            )
+            if val_child is not None:
+                secret_locations.append(
+                    _with_line(f"{current_section}/set-query-parameter[name={param}]", val_child)
+                )
                 handled_value_children = True
         handled_value_attr = False
         if (
@@ -288,7 +340,9 @@ def _scan_policy(
             and _is_hardcoded_secret_value(node.attrib.get("value", ""))
         ):
             var_name = node.attrib.get("name", "").strip().lower()
-            secret_locations.append(f"{current_section}/set-variable[name={var_name}]")
+            secret_locations.append(
+                _with_line(f"{current_section}/set-variable[name={var_name}]", node)
+            )
             handled_value_attr = True
         elif (
             node.tag == "key"
@@ -296,7 +350,9 @@ def _scan_policy(
             and not node.attrib.get("certificate-id")
             and _is_hardcoded_secret_value(node.text or "")
         ):
-            secret_locations.append(f"{current_section}/validate-jwt/{parent_tag}/key")
+            secret_locations.append(
+                _with_line(f"{current_section}/validate-jwt/{parent_tag}/key", node)
+            )
 
         for key, raw_attr in node.attrib.items():
             if (node.tag == "authentication-basic" and key == "password") or (
@@ -305,9 +361,9 @@ def _scan_policy(
                 continue
             cleaned_attr = NAMED_VALUE_TOKEN.sub("", raw_attr)
             if key in {"base-url", "url", "template"} and url_api_key(cleaned_attr) is True:
-                secret_locations.append(f"{current_section}/{node.tag}@{key}")
+                secret_locations.append(_with_line(f"{current_section}/{node.tag}@{key}", node))
             elif cleaned_attr.strip() and SECRET_PATTERN.search(raw_attr):
-                secret_locations.append(f"{current_section}/{node.tag}@{key}")
+                secret_locations.append(_with_line(f"{current_section}/{node.tag}@{key}", node))
 
         raw_text = (node.text or "").strip()
         if raw_text and not (
@@ -315,7 +371,7 @@ def _scan_policy(
         ):
             cleaned_text = NAMED_VALUE_TOKEN.sub("", raw_text)
             if node.tag == "set-url" and url_api_key(cleaned_text) is True:
-                secret_locations.append(f"{current_section}/set-url")
+                secret_locations.append(_with_line(f"{current_section}/set-url", node))
             elif cleaned_text.strip() and SECRET_PATTERN.search(raw_text):
                 if not (
                     node.tag == "value" and parent_tag in {"set-header", "set-query-parameter"}
@@ -325,7 +381,7 @@ def _scan_policy(
                         if node.tag == "value" and parent_tag
                         else f"{current_section}/{node.tag}"
                     )
-                    secret_locations.append(loc)
+                    secret_locations.append(_with_line(loc, node))
 
         for child in node:
             if handled_value_children and child.tag == "value":
@@ -335,8 +391,9 @@ def _scan_policy(
             visit(child, current_section, node.tag)
 
     visit(root, "fragment" if fragment else "", None)
-    if not secret_locations and SECRET_PATTERN.search(xml):
-        secret_locations.append("xml/comment-or-text")
+    if not secret_locations and (comment_match := SECRET_PATTERN.search(xml)):
+        lineno = xml.count("\n", 0, comment_match.start()) + 1
+        secret_locations.append(f"xml/comment-or-text:L{lineno}")
     return (
         list(dict.fromkeys(secret_locations)),
         list(dict.fromkeys(hardcoded_urls)),
@@ -412,7 +469,7 @@ def sanitize_policy(
     if len(xml.encode("utf-8")) > MAX_XML_BYTES:
         return unavailable("XML_TOO_LARGE")
     try:
-        root = fromstring(xml, forbid_dtd=True, forbid_entities=True, forbid_external=True)
+        root, lines = _parse_xml_with_lines(xml)
     except (ET.ParseError, DefusedXmlException, ValueError):
         return unavailable("INVALID_XML")
     if root.tag != ("fragment" if fragment else "policies"):
@@ -423,7 +480,7 @@ def sanitize_policy(
     if fragment and any(node.tag in {*SECTIONS, "base", "include-fragment"} for node in nodes):
         return unavailable("INVALID_FRAGMENT_STRUCTURE")
     secret_locations, hardcoded_urls, named_value_refs = (
-        ([], [], []) if already_sanitized else _scan_policy(root, xml, fragment=fragment)
+        ([], [], []) if already_sanitized else _scan_policy(root, xml, lines, fragment=fragment)
     )
     secret_pattern = bool(secret_locations)
     header_values: dict[int, str] = {}

@@ -588,26 +588,28 @@ def test_structural_and_regex_secret_scanner_detects_inline_secrets_without_fals
     secret_var = "hardcoded-client-secret-xyz"
     doc = sanitize_policy(
         "apis/orders/policies/xml",
-        "<policies><inbound>"
-        f'<authentication-basic username="svc" password="{secret_pw}"/>'
-        '<set-header name="x-api-key" exists-action="override">'
-        f"<value>{secret_key}</value></set-header>"
-        '<set-query-parameter name="code" exists-action="override">'
-        f"<value>{secret_q}</value></set-query-parameter>"
-        '<validate-jwt header-name="Authorization">'
-        f"<issuer-signing-keys><key>{secret_jwt_key}</key></issuer-signing-keys>"
-        "</validate-jwt>"
-        f'<set-variable name="clientSecret" value="{secret_var}"/>'
-        "</inbound><backend><base/></backend><outbound><base/></outbound>"
-        "<on-error><base/></on-error></policies>",
+        "<!--\n  Policy comment header\n-->\n<policies>\n  <inbound>\n"
+        f'    <authentication-basic username="svc" password="{secret_pw}"/>\n'
+        '    <set-header name="x-api-key" exists-action="override">\n'
+        f"      <value>{secret_key}</value>\n"
+        "    </set-header>\n"
+        '    <set-query-parameter name="code" exists-action="override">\n'
+        f"      <value>{secret_q}</value>\n"
+        "    </set-query-parameter>\n"
+        '    <validate-jwt header-name="Authorization">\n'
+        f"      <issuer-signing-keys><key>{secret_jwt_key}</key></issuer-signing-keys>\n"
+        "    </validate-jwt>\n"
+        f'    <set-variable name="clientSecret" value="{secret_var}"/>\n'
+        "  </inbound>\n  <backend><base/></backend>\n  <outbound><base/></outbound>\n"
+        "  <on-error><base/></on-error>\n</policies>",
     )
     assert doc.has_inline_secret_pattern is True
     assert doc.inline_secret_locations == [
-        "inbound/authentication-basic@password",
-        "inbound/set-header[name=x-api-key]",
-        "inbound/set-query-parameter[name=code]",
-        "inbound/validate-jwt/issuer-signing-keys/key",
-        "inbound/set-variable[name=clientsecret]",
+        "inbound/authentication-basic@password:L6",
+        "inbound/set-header[name=x-api-key]:L8",
+        "inbound/set-query-parameter[name=code]:L11",
+        "inbound/validate-jwt/issuer-signing-keys/key:L14",
+        "inbound/set-variable[name=clientsecret]:L16",
     ]
     dumped = doc.model_dump_json()
     for val in (secret_pw, secret_key, secret_q, secret_jwt_key, secret_var):
@@ -617,7 +619,7 @@ def test_structural_and_regex_secret_scanner_detects_inline_secrets_without_fals
     sec15 = finding(catalog_snapshot, "APIM-SEC-015")
     assert sec15.result.outcome == "fail"
     assert any(
-        "locations=inbound/authentication-basic@password, inbound/set-header[name=x-api-key]"
+        "locations=inbound/authentication-basic@password:L6, inbound/set-header[name=x-api-key]:L8"
         in item.detail
         for item in sec15.result.evidence
     )

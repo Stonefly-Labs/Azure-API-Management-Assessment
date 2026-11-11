@@ -639,12 +639,12 @@ def test_hardcoded_policy_urls_detected_across_elements_and_non_routing_policies
         ),
     )
     doc = policy_snapshot.instances[0].inventory.policies["apis/orders"]
-    assert doc.hardcoded_urls == ["inbound/send-request/set-url"]
+    assert doc.hardcoded_urls == ["inbound/send-request/set-url:L1"]
     ops2 = next(
         item for item in analyze(policy_snapshot).findings if item.rule.id == "APIM-OPS-002"
     )
     assert ops2.result.outcome == "fail"
-    assert "hardcoded_urls=apis/orders/inbound/set-url" in ops2.result.evidence[0].detail
+    assert "hardcoded_urls=apis/orders/inbound/set-url:L1" in ops2.result.evidence[0].detail
 
     # Named-value token in set-url or relative rewrite-uri does not fail APIM-OPS-002
     put(
