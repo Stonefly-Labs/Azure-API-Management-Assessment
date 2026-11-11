@@ -86,9 +86,9 @@
   non_prod_severity: Low
   applicability: HTTP and SOAP execution contexts with a determinable effective backend route.
   required_signals: [apis.serviceUrl, backends, effective_policy.inbound, effective_policy.backend]
-  description: Resolve routing order to distinguish a literal API or policy URL from a reference to a collected backend entity. Dynamic and named-value routes remain unknown.
+  description: Resolve routing order and policy URL targets (set-backend-service base-url, set-url, rewrite-uri) to distinguish a literal API or policy URL from a reference to a collected backend entity. Dynamic and named-value routes remain unknown.
   business_impact: Duplicated endpoint configuration complicates changes and centralized resilience management.
-  remediation: Define an APIM backend entity and reference it with set-backend-service backend-id at the effective scope.
+  remediation: Define an APIM backend entity and reference it with set-backend-service backend-id at the effective scope; externalize callout URLs via named values or backend entities.
   references:
     - https://learn.microsoft.com/en-us/azure/api-management/set-backend-service-policy
     - https://learn.microsoft.com/en-us/azure/api-management/backends

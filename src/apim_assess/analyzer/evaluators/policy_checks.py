@@ -218,6 +218,11 @@ def inline_secrets(ctx: Context) -> Evaluation:
     documents = [*inventory.policies.values(), *inventory.fragments.values()]
     observations: list[tuple[Outcome, Evidence]] = []
     for document in documents:
+        locations = (
+            f"locations={', '.join(document.inline_secret_locations)}; "
+            if document.inline_secret_locations
+            else ""
+        )
         observations.append(
             (
                 "fail"
@@ -229,7 +234,7 @@ def inline_secrets(ctx: Context) -> Evaluation:
                     source=document.source,
                     detail=f"status={document.status}; "
                     f"has_inline_secret_pattern={document.has_inline_secret_pattern}; "
-                    "no secret literal retained.",
+                    f"{locations}no secret literal retained.",
                 ),
             )
         )

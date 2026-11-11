@@ -268,6 +268,7 @@ def managed_identity(ctx: Context) -> Evaluation:
 
 
 def named_secrets(ctx: Context) -> Evaluation:
+    inventory = ctx.instance.inventory
     observations: list[tuple[Outcome, Evidence]] = []
     for item in ctx.resources("named_value"):
         metadata = item.metadata
@@ -280,13 +281,29 @@ def named_secrets(ctx: Context) -> Evaluation:
             if item.workspace and metadata.key_vault is not True
             else boolean(metadata.key_vault)
         )
+        nv_ref = reference_id(item.name.casefold())
+        referenced_by: list[str] = []
+        if inventory is not None:
+            for scope, doc in sorted(inventory.policies.items()):
+                if (
+                    item.workspace is None
+                    or scope == item.workspace
+                    or scope.startswith(item.workspace + "/")
+                ) and nv_ref in doc.named_value_refs:
+                    referenced_by.append(scope or "global")
+            for key, doc in sorted(inventory.fragments.items()):
+                if (
+                    item.workspace is None or key.startswith(item.workspace + "/policyFragments/")
+                ) and nv_ref in doc.named_value_refs:
+                    referenced_by.append(key)
+        refs_detail = f"referenced_by={', '.join(referenced_by)}; " if referenced_by else ""
         observations.append(
             (
                 outcome,
                 Evidence(
                     source=item.resource_id,
-                    detail=f"secret={metadata.secret}; "
-                    f"key_vault_linked={metadata.key_vault}; values not retrieved.",
+                    detail=f"name={item.name}; secret={metadata.secret}; "
+                    f"key_vault_linked={metadata.key_vault}; {refs_detail}values not retrieved.",
                 ),
             )
         )

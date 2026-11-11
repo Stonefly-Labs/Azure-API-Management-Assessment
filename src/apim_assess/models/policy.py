@@ -32,6 +32,9 @@ class PolicyDocument(PolicyModel):
     status: Literal["available", "absent", "unavailable"]
     xml: str | None = None
     has_inline_secret_pattern: bool = False
+    inline_secret_locations: list[str] = Field(default_factory=list)
+    hardcoded_urls: list[str] = Field(default_factory=list)
+    named_value_refs: list[str] = Field(default_factory=list)
     error_code: str | None = None
 
 

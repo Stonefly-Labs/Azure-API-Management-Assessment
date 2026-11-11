@@ -96,7 +96,7 @@
   evaluator: named_value_secrets
   applicability: Secret=true metadata; workspace Key Vault linkage constraints are unsupported rather than impossible failures.
   required_signals: [namedValues.secret, namedValues.keyVault]
-  description: Check metadata linkage only; neither named-value contents nor Key Vault secret versions are retrieved.
+  description: Check metadata linkage and policy reference usage only; neither named-value contents nor Key Vault secret versions are retrieved.
   business_impact: Locally managed secrets can complicate rotation, ownership and access auditing.
   remediation: Where supported, migrate secret named values to Key Vault with managed identity and tested rotation; document alternatives for constrained workspaces.
   references:
@@ -137,9 +137,9 @@
   severity: Critical
   non_prod_severity: High
   evaluator: inline_secrets
-  applicability: All collected local policies and fragments, including policies overridden at runtime; pattern evidence, not secret disclosure.
+  applicability: All collected local policies and fragments, including policies overridden at runtime; pattern and structural evidence, not secret disclosure.
   required_signals: [policies.has_inline_secret_pattern, fragments.has_inline_secret_pattern]
-  description: Retain only the boolean secret-pattern flag and source. A pattern-free scan cannot prove every secret is absent.
+  description: Retain only the boolean secret-pattern flag, sanitized structural location breadcrumbs and source. A pattern-free scan cannot prove every secret is absent.
   business_impact: Embedded credentials complicate rotation and can leak through configuration exports.
   remediation: Review the original policy securely, rotate confirmed exposed credentials and replace literals with supported Key Vault-backed named values or managed identity.
   references:
