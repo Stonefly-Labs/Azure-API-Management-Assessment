@@ -130,6 +130,13 @@ For each API and Operation, the analyzer constructs an **Effective Policy Model*
 
 The `report` stage produces a **single, 100% self-contained `.html` artifact** (zero external CDNs, inline CSS/JS/SVG, air-gap safe):
 
+Iteration 6 updates the default presentation below to a focused, seven-tab
+readout based on the supplied HTML design reference: Overview, Findings,
+Verification gaps, Roadmap, MCSB controls, API policy coverage, and Method &
+scope. The same saved assessment powers every view; presentation navigation
+remains optional. This supersedes the slide-first default, not the evidence,
+coverage, sanitization, offline, or scoring requirements.
+
 1. **Portfolio Rollup + 1–N APIM Instance Switcher**
    - Top navigation bar lets presenters view the **Portfolio Executive Rollup** across all scanned APIM instances or switch instantaneously to any individual APIM instance.
 2. **Mode 1: Interactive Slide Presentation Mode (Readout Deck)**

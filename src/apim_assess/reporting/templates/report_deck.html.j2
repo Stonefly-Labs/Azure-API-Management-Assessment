@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
-<title>APIM assessment - Iteration {{ iteration }}</title>
+<title>API Management assessment</title>
 <script>
   (() => {
     const param = new URLSearchParams(window.location.search).get("scoutTheme");
-    const theme =
-      param || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    const theme = ["light", "dark"].includes(param) ? param :
+      (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
     document.documentElement.setAttribute("data-theme", theme);
   })();
 </script>
@@ -67,460 +67,501 @@ html[data-theme="dark"] {
   --cp-highlight: rgba(253, 142, 161, 0.12);
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--cp-bg); color: var(--cp-text); font: 16px/1.5 "Segoe UI", Aptos, Calibri, -apple-system, BlinkMacSystemFont, sans-serif; }
-header, footer { padding: 16px 32px; background: var(--cp-bg-elevated); border-bottom: 1px solid var(--cp-border); display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
-header { position: sticky; top: 0; z-index: 1; }
-header strong { margin-right: auto; }
-main { max-width: 1440px; margin: auto; padding: 32px; }
-.slide { min-height: 65vh; }
-.eyebrow { color: var(--cp-accent); text-transform: uppercase; letter-spacing: 0.12em; font-weight: 600; }
-h1 { font-size: clamp(2rem, 5vw, 4rem); line-height: 1.1; max-width: 1000px; }
-h2 { font-size: 2rem; }
-h3 { margin-top: 0; }
-.muted, small { color: var(--cp-text-muted); }
-.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
-.card, article, .notice { padding: 24px; border: 1px solid var(--cp-border); background: var(--cp-surface); border-radius: 16px; margin-bottom: 16px; }
-.score { font-size: 2.5rem; color: var(--cp-accent); }
-.notice { border-left: 4px solid var(--cp-warning); }
-button, select, input { font: inherit; background: var(--cp-surface); color: var(--cp-text); border: 1px solid var(--cp-border-strong); border-radius: 0.625rem; padding: 8px 12px; max-width: 100%; }
-button { cursor: pointer; }
-button:hover { background: var(--cp-accent-soft); }
-button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px solid var(--cp-accent); outline-offset: 4px; }
-button:disabled { cursor: default; color: var(--cp-text-muted); }
+html { scroll-padding-top: 80px; }
+body { margin: 0; background: var(--cp-bg); color: var(--cp-text); font: 15px/1.5 "Segoe UI", Aptos, Calibri, -apple-system, BlinkMacSystemFont, sans-serif; }
 a { color: var(--cp-link); overflow-wrap: anywhere; }
-code { font-family: Consolas, "Courier New", Courier, monospace; overflow-wrap: anywhere; }
-.table-wrap { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; margin: 16px 0; }
-th, td { padding: 12px; border-bottom: 1px solid var(--cp-border); text-align: left; vertical-align: top; }
-th { color: var(--cp-text-muted); }
-.pass { color: var(--cp-success); }
+button, select, input { font: inherit; color: inherit; max-width: 100%; }
+button, select, input[type="search"] { border: 1px solid var(--cp-border-strong); border-radius: 0.625rem; padding: 8px 12px; background: var(--cp-surface); }
+button, summary { cursor: pointer; }
+button:hover { background: var(--cp-accent-soft); }
+button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visible, [tabindex="0"]:focus-visible { outline: 2px solid var(--cp-accent); outline-offset: 3px; }
+button:disabled { cursor: default; color: var(--cp-text-muted); }
+button[aria-pressed="true"], .preset { color: var(--cp-accent); background: var(--cp-accent-soft); border-color: var(--cp-accent); }
+h1, h2, h3, h4 { line-height: 1.25; margin: 0 0 8px; }
+h1 { font-size: 1.6rem; } h2 { font-size: 1.25rem; } h3 { font-size: 1rem; }
+p { margin: 8px 0; }
+.muted, small { color: var(--cp-text-muted); }
+.small { font-size: .85rem; }
+code, .mono { font-family: Consolas, "Courier New", Courier, monospace; font-size: .82rem; overflow-wrap: anywhere; }
+.eyebrow { font-size: .75rem; letter-spacing: .1em; text-transform: uppercase; color: var(--cp-accent); font-weight: 600; }
+.top { background: var(--cp-surface); border-bottom: 1px solid var(--cp-border); }
+.top-inner, .tabs-inner, main, .foot { max-width: 1320px; margin: auto; padding: 20px 28px; }
+.top-inner, .controls, .section-head, .line, .presets { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.brand { flex: 1 1 420px; }
+.tabs { position: sticky; top: 0; z-index: 5; background: var(--cp-surface); border-bottom: 1px solid var(--cp-border); }
+.tabs-inner { display: flex; gap: 4px; padding-top: 0; padding-bottom: 0; overflow-x: auto; }
+.tab { border: 0; border-radius: 0; border-bottom: 3px solid var(--cp-surface); padding: 12px; white-space: nowrap; color: var(--cp-text-muted); background: var(--cp-surface); font-weight: 600; }
+.tab[aria-selected="true"] { border-bottom-color: var(--cp-accent); color: var(--cp-text); }
+.count, .chip, .tag, .badge { display: inline-block; font-size: .75rem; padding: 2px 8px; border-radius: 6px; background: var(--cp-surface-soft); white-space: normal; overflow-wrap: anywhere; }
+.count { margin-left: 4px; }
+.tag { color: var(--cp-accent); background: var(--cp-accent-soft); }
+.chip { border: 1px solid var(--cp-border); }
+.badge { font-weight: 700; }
 .fail { color: var(--cp-danger); }
-.unknown, .unsupported { color: var(--cp-text-muted); }
-.warning { color: var(--cp-warning); }
-.filters { display: flex; flex-wrap: wrap; gap: 16px; padding: 16px 0; align-items: end; }
-.filters label { display: grid; gap: 4px; flex: 1 1 180px; }
-.filters input { width: 100%; }
-summary { cursor: pointer; overflow-wrap: anywhere; }
-.finding h3 { margin: 8px 0; }
-.finding details > div { padding-top: 16px; }
-body[data-mode="slides"] .explorer-filters, body[data-mode="slides"] #explorer-nav { display: none; }
-body[data-mode="explorer"] footer { display: none; }
-#explorer-nav { padding: 16px 32px; display: flex; gap: 8px; flex-wrap: wrap; }
-button[aria-pressed="true"] { border-color: var(--cp-accent); background: var(--cp-accent-soft); }
-.badge { font-weight: 700; text-transform: uppercase; }
-svg { width: 100%; max-width: 600px; height: auto; color: var(--cp-text); }
+.pass { color: var(--cp-success); }
+.unknown, .warning { color: var(--cp-warning); }
+.unsupported, .waived, .not_applicable { color: var(--cp-text-muted); }
+.grid { display: grid; gap: 16px; }
+.g4 { grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); }
+.g2 { grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); }
+.g3 { grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); }
+.card, .finding { background: var(--cp-surface); border: 1px solid var(--cp-border); border-radius: 16px; padding: 20px; margin-bottom: 16px; }
+.section-head { justify-content: space-between; margin-bottom: 12px; }
+.bottomline { border-left: 5px solid var(--cp-accent); }
+.bottomline p { font-size: 1.05rem; }
+.value { font-size: 2.1rem; font-weight: 700; line-height: 1.2; margin: 4px 0; }
+.kpi .label { font-size: .8rem; color: var(--cp-text-muted); text-transform: uppercase; letter-spacing: .05em; }
+.text-button { padding: 0; border: 0; border-radius: 0; background: var(--cp-surface); color: var(--cp-link); text-align: left; }
+.text-button:hover { text-decoration: underline; background: var(--cp-surface); }
+.bar { display: flex; height: 12px; border-radius: 8px; overflow: hidden; background: var(--cp-surface-soft); }
+.bar span { display: block; min-width: 0; }
+.o-fail { background: var(--cp-danger); } .o-pass, .c-present { background: var(--cp-success); }
+.o-unknown, .c-unknown { background: var(--cp-warning); }
+.o-unsupported { background: var(--cp-text-soft); } .o-waived { background: var(--cp-accent); }
+.o-not_applicable, .c-not_applicable { background: var(--cp-border-strong); }
+.c-absent { background: var(--cp-danger); }
+.legend { display: flex; gap: 8px 16px; flex-wrap: wrap; margin-top: 8px; font-size: .8rem; color: var(--cp-text-muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; margin-right: 4px; border-radius: 3px; }
+.priority, .pillar { border-bottom: 1px solid var(--cp-border); padding: 12px 0; }
+.priority:last-child, .pillar:last-child { border-bottom: 0; }
+.pillar { display: grid; grid-template-columns: 64px 1fr; gap: 12px; align-items: center; }
+.ring { width: 60px; height: 60px; border-radius: 50%; display: grid; place-items: center; background: conic-gradient(var(--cp-accent) calc(var(--p) * 1%), var(--cp-surface-soft) 0); }
+.ring strong { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 50%; background: var(--cp-surface); font-size: .85rem; }
+.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; font-size: .86rem; }
+.kv dt { color: var(--cp-text-muted); } .kv dd { margin: 0; overflow-wrap: anywhere; }
+.notice { border-left: 4px solid var(--cp-warning); padding: 12px 16px; background: var(--cp-surface-soft); border-radius: 0.625rem; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .85rem; margin: 12px 0; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--cp-border); vertical-align: top; }
+th { font-size: .75rem; color: var(--cp-text-muted); background: var(--cp-surface-soft); }
+.filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.filters label { display: grid; gap: 4px; font-size: .8rem; flex: 1 1 160px; }
+.filters input, .filters select { width: 100%; }
+.outcome-toggles { display: flex; gap: 8px; flex-wrap: wrap; flex-basis: 100%; }
+.outcome-toggles button { font-size: .8rem; padding: 4px 12px; }
+.finding { padding: 0; border-radius: 0.625rem; margin-bottom: 8px; }
+.finding > summary { list-style: none; display: grid; grid-template-columns: 100px 1fr auto; gap: 12px; align-items: center; padding: 16px; }
+.finding > summary::-webkit-details-marker { display: none; }
+.finding > summary::before { content: "+"; color: var(--cp-accent); position: absolute; margin-left: -10px; }
+.finding[open] > summary::before { content: "-"; }
+.finding[open] > summary { border-bottom: 1px solid var(--cp-border); }
+.finding-body { padding: 16px; }
+.instance-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: 320px; }
+.explanation > div { background: var(--cp-surface-soft); padding: 12px; border-radius: 0.625rem; }
+.explanation h4 { font-size: .75rem; text-transform: uppercase; color: var(--cp-text-muted); }
+.instance-tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--cp-border); margin: 16px 0 12px; }
+.instance-tabs button { border: 0; border-radius: 0; border-bottom: 2px solid var(--cp-surface); font-size: .85rem; }
+.instance-tabs button[aria-selected="true"] { border-bottom-color: var(--cp-accent); }
+.evidence-pattern { border: 1px solid var(--cp-border); border-radius: 0.625rem; margin: 8px 0; }
+.evidence-pattern summary { padding: 8px 12px; overflow-wrap: anywhere; }
+.evidence-pattern ul { margin: 0; padding: 12px 32px; border-top: 1px solid var(--cp-border); }
+.lane { align-self: start; }
+.roadmap-item { border: 1px solid var(--cp-border); border-left: 4px solid var(--cp-accent); border-radius: 0.625rem; padding: 12px; margin-top: 12px; }
+.empty { padding: 24px; text-align: center; color: var(--cp-text-muted); }
+svg { width: 100%; max-width: 600px; height: auto; }
 .node { fill: var(--cp-surface-soft); stroke: var(--cp-border-strong); }
 .edge { stroke: var(--cp-accent); stroke-width: 2; }
 svg text { fill: var(--cp-text); font-size: 15px; }
+.foot { font-size: .8rem; color: var(--cp-text-muted); overflow-wrap: anywhere; }
+#presentation-nav { display: flex; justify-content: center; align-items: center; gap: 16px; padding: 16px; }
+.skip-link { position: absolute; top: -100px; left: 16px; padding: 8px; background: var(--cp-surface); z-index: 10; }
+.skip-link:focus { top: 8px; }
 [hidden] { display: none !important; }
-footer { justify-content: center; border-top: 1px solid var(--cp-border); }
+@media (max-width: 720px) {
+  .top-inner, .tabs-inner, main, .foot { padding-left: 16px; padding-right: 16px; }
+  .finding > summary { grid-template-columns: 1fr; }
+  .instance-chips { max-width: none; justify-content: flex-start; }
+  .kv { grid-template-columns: 1fr; gap: 4px; }
+  .kv dd { margin-bottom: 8px; }
+}
 @media print {
-  header, footer, #explorer-nav, .explorer-filters { display: none !important; }
-  main { padding: 0; }
-  .scope:not([hidden]) .slide[hidden] { display: block !important; }
-  .slide { break-before: page; min-height: 0; }
-  article { break-inside: avoid; }
+  .top, .tabs, .filters, .presets, .noprint, #presentation-nav, .skip-link { display: none !important; }
+  main { max-width: none; padding: 0; }
+  .scope:not([hidden]) > .panel[hidden] { display: block !important; }
+  .panel { break-before: page; } .panel:first-child { break-before: auto; }
+  .card, .roadmap-item { break-inside: avoid; }
+  .finding { break-inside: auto; }
+  .table-wrap { overflow: visible; }
+  .grid { display: block; }
 }
 </style>
 </head>
-<body data-mode="slides">
-<header>
-  <strong>apim-assess / assessment</strong>
-  <label for="scope-select">Scope</label>
-  <select id="scope-select">
-    {% for scope in scopes %}<option value="{{ loop.index0 }}">{{ scope.title }}</option>{% endfor %}
-  </select>
-  <button id="mode" type="button" aria-pressed="false">Deep-dive explorer</button>
-  <button id="theme" type="button">Toggle theme</button>
-  <button id="fullscreen" type="button">Fullscreen</button>
+{% macro badge(outcome) -%}
+<span class="badge {{ outcome }}">{{ "N/A" if outcome == "not_applicable" else outcome | capitalize }}</span>
+{%- endmacro %}
+{% macro bar(counts) -%}
+{% set total = counts.values() | sum %}
+<div class="bar" role="img" aria-label="{% for outcome, count in counts.items() %}{{ outcome }} {{ count }}{{ ', ' if not loop.last }}{% endfor %}">
+{% for outcome, count in counts.items() if count %}<span class="o-{{ outcome }}" style="width: {{ 100 * count / total }}%" title="{{ outcome }}: {{ count }}"></span>{% endfor %}
+</div>
+<div class="legend">{% for outcome, count in counts.items() %}<span><i class="o-{{ outcome }}"></i>{{ "N/A" if outcome == "not_applicable" else outcome | capitalize }} {{ count }}</span>{% endfor %}</div>
+{%- endmacro %}
+{% macro open_rule(id, label, resource_id=none) -%}
+<button type="button" class="text-button" data-open="{{ id }}"{% if resource_id %} data-resource="{{ resource_id }}"{% endif %}>{{ label }}</button>
+{%- endmacro %}
+<body data-mode="focused">
+<a href="#main" class="skip-link">Skip to assessment</a>
+<header class="top">
+  <div class="top-inner">
+    <div class="brand">
+      <div class="eyebrow">Azure Well-Architected / Microsoft cloud security benchmark</div>
+      <h1>API Management assessment</h1>
+      <div class="small muted">{{ snapshot.instances | length }} instances / {{ group_findings(scopes[0].findings) | length }} rules / collected {{ snapshot.collected_at.isoformat() }}</div>
+    </div>
+    <div class="controls">
+      <label for="scope-select">Scope</label>
+      <select id="scope-select">{% for scope in scopes %}<option value="{{ loop.index0 }}">{{ "All instances" if scope.portfolio else scope.title }}</option>{% endfor %}</select>
+      <button id="theme" type="button">Theme</button>
+      <button id="print" type="button">Print / PDF</button>
+      <button id="mode" type="button" aria-pressed="false">Presentation mode</button>
+      <button id="fullscreen" type="button">Fullscreen</button>
+    </div>
+  </div>
 </header>
-<nav id="explorer-nav" aria-label="Explorer views">
-  <button type="button" data-panel="findings" aria-pressed="true">Findings</button>
-  <button type="button" data-panel="policy" aria-pressed="false">Effective policies</button>
-  <button type="button" data-panel="mcsb" aria-pressed="false">MCSB coverage</button>
-  {% if iteration == "5" %}
-  <button type="button" data-panel="modern" aria-pressed="false">Upstream &amp; AI gateway</button>
-  <button type="button" data-panel="roadmap" aria-pressed="false">Remediation roadmap</button>
-  {% endif %}
-</nav>
-<main>
+{% set tabs = [("overview", "Overview"), ("findings", "Findings"), ("gaps", "Verification gaps"), ("roadmap", "Roadmap"), ("mcsb", "MCSB controls"), ("policy", "API policy coverage"), ("method", "Method & scope")] %}
+<nav class="tabs" aria-label="Report sections"><div class="tabs-inner" role="tablist" aria-label="Assessment views">
+{% for key, label in tabs %}<button type="button" class="tab" id="tab-{{ key }}" role="tab" data-view="{{ key }}" aria-controls="scope-0-{{ key }}" aria-selected="{{ 'true' if loop.first else 'false' }}" tabindex="{{ 0 if loop.first else -1 }}">{{ label }}{% if key in ["findings", "gaps"] %}<span class="count" data-count="{{ key }}"></span>{% endif %}</button>{% endfor %}
+</div></nav>
+<noscript><p class="notice">Enable JavaScript for tabs, filters and scope switching. The portfolio overview remains readable.</p></noscript>
+<main id="main" tabindex="-1">
 {% for scope in scopes %}
-<div class="scope" id="scope-{{ loop.index0 }}">
-  <section class="slide">
-    <p class="eyebrow">Iteration {{ iteration }} / assessment scope</p>
-    <h1>API Management<br>{{ scope.title }} readout</h1>
-    <p>{{ scope.instances | length }} instance(s) / collected {{ snapshot.collected_at.isoformat() }}</p>
-    <p class="muted">Telemetry: {{ snapshot.telemetry_start.isoformat() }} to {{ snapshot.telemetry_end.isoformat() }} (UTC)</p>
-    <div class="notice">{% if legacy %}Legacy findings: five service rules, no policy assessment.
-      {% elif iteration == "2" %}Five service rules and six policy rules.
-      Historical policy interpretations are preserved; rerun analyze to apply current checks.
-      {% else %}Core APIM five-pillar catalog; {{ scope.findings | length }} rule results in this scope.{% endif %} Not a complete MCSB compliance assessment.
-      Unknown and unsupported signals are never treated as passes. Policy results assess configuration,
-      not runtime enforcement. {% if iteration in ["4", "5"] %}Linked network/governance metadata and optional
-      aggregate gateway logs are included when available. {% else %}Adjacent-network analysis remains outside
-      this historical assessment. {% endif %}{% if iteration == "5" %}Optional upstream WAF
-      probes and recognized LLM/GraphQL checks are included with explicit evidence limits.
-      {% else %}Upstream WAF and AI gateway analysis remain outside scope.{% endif %}</div>
-    {% for instance in scope.instances %}
-    <article>
-      <h3>{{ instance.name }}</h3>
-      <code>{{ instance.resource_id }}</code>
-      <p>{{ instance.environment }} ({{ instance.environment_source }}); core collection: {{ instance.core_status }}</p>
-    </article>
-    {% endfor %}
-    <h3>Collection warnings</h3>
-    {% for warning in snapshot.collection_warnings %}
-      {% if scope.portfolio or warning.resource_id == scope.instances[0].resource_id or warning.module == "discovery" %}
-      <p><strong>{{ warning.module }} / {{ warning.code }}</strong>: {{ warning.message }} <code>{{ warning.resource_id }}</code></p>
-      {% endif %}
-    {% else %}<p>No collection warnings recorded.</p>{% endfor %}
-  </section>
-  <section class="slide">
-    <p class="eyebrow">Executive scorecard / {{ scope.title }}</p>
-    <h2>Health of the assessed controls</h2>
-    <div class="cards">
-      {% for score in scope.scores %}
+{% set s = loop.index0 %}
+{% set groups = group_findings(scope.findings) %}
+{% set failures = scope.findings | selectattr("result.outcome", "equalto", "fail") | selectattr("waiver_justification", "none") | list %}
+{% set gaps = scope.findings | selectattr("result.outcome", "in", ["unknown", "unsupported"]) | selectattr("waiver_justification", "none") | list %}
+{% set priorities = group_findings(failures) %}
+{% set counts = outcome_counts(scope.findings) %}
+{% set warnings = namespace(rows=[]) %}
+{% for warning in snapshot.collection_warnings %}{% if scope.portfolio or warning.resource_id == scope.instances[0].resource_id or warning.module == "discovery" %}{% set warnings.rows = warnings.rows + [warning] %}{% endif %}{% endfor %}
+<div class="scope" id="scope-{{ s }}" data-fail-count="{{ priorities | length }}" data-gap-count="{{ group_findings(gaps) | length }}"{% if s %} hidden{% endif %}>
+  <section class="panel" id="scope-{{ s }}-overview" data-panel="overview" role="tabpanel" aria-labelledby="tab-overview" tabindex="0">
+    <div class="card bottomline">
+      <div class="eyebrow">Bottom line / {{ scope.title }} readout</div>
+      <p><strong>{{ counts.fail }} confirmed issues</strong> across <strong>{{ priorities | length }} rules</strong>{% if priorities %}, led by <strong>{{ priorities[0].rule.title }}</strong> ({{ priorities[0].severity }}){% endif %}.</p>
+      <p>{% if confidence(scope.findings) is not none %}<strong>{{ confidence(scope.findings) }}%</strong> of applicable, unwaived checks could be determined.{% else %}<strong>No applicable, unwaived checks could be determined.</strong>{% endif %}
+        <strong>{{ counts.unknown + counts.unsupported }} results</strong> need verification, so treat scores as partial. {{ counts.waived }} waived results are excluded, not passes.</p>
+      <p class="small muted">Configuration observations, not runtime enforcement or a complete MCSB compliance assessment.</p>
+    </div>
+    <div class="grid g4">
+      <div class="card kpi"><div class="label">Confirmed issues</div><div class="value fail">{{ counts.fail }}</div><p class="small muted">{{ priorities | length }} rules / assessed severity, environment-adjusted</p><button class="text-button" type="button" data-preset="fail">Review findings</button></div>
+      <div class="card kpi"><div class="label">Needs verification</div><div class="value unknown">{{ counts.unknown + counts.unsupported }}</div><p class="small muted">{{ group_findings(gaps) | length }} rules / never counted as passes</p><button class="text-button" type="button" data-goto="gaps">See verification gaps</button></div>
+      <div class="card kpi"><div class="label">Passing</div><div class="value pass">{{ counts["pass"] }}</div><p class="small muted">{{ counts.not_applicable }} not applicable / {{ counts.waived }} waived</p><button class="text-button" type="button" data-preset="pass">See passes</button></div>
+      <div class="card kpi"><div class="label">MCSB mapped pass rate</div><div class="value">{{ (scope.mcsb_score | string) + "%" if scope.mcsb_score is not none else "N/A" }}</div><p class="small muted">{{ scope.mcsb_coverage | selectattr("status", "in", ["pass", "fail"]) | list | length }} of {{ scope.mcsb_coverage | length }} control-instance mappings determinable</p><button class="text-button" type="button" data-goto="mcsb">Control view</button></div>
+    </div>
+    <div class="card"><div class="section-head"><h2>Assessment confidence</h2><span class="small muted">{{ scope.findings | length }} rule results in scope</span></div>{{ bar(counts) }}</div>
+    <div class="grid g2">
       <div class="card">
-        <h3>{{ score.pillar }}</h3>
-        <div class="score">{{ score.score if score.score is not none else "N/A" }}</div>
-        <p>{{ score.passed }} pass / {{ score.failed }} fail<br>{{ score.unknown }} unknown<br>{{ score.unsupported }} unsupported / {{ score.not_applicable }} not applicable<br>{{ score.waived }} waived (excluded)</p>
-        {% if score.score is none %}<small>Not assessed; not a healthy score.</small>{% endif %}
+        <div class="section-head"><h2>Top priorities</h2><button class="preset" type="button" data-goto="roadmap">Roadmap</button></div>
+        {% for group in priorities[:6] %}<div class="priority">
+          <div class="line"><span class="badge fail">{{ group.severity }}</span><span class="tag">{{ group.rule.pillar }}</span><code>{{ group.rule.id }}</code></div>
+          <h3>{{ open_rule(group.rule.id, group.rule.title) }}</h3>
+          <div class="line">{% for finding in group.findings %}<span class="chip">{{ identities[finding.resource_id].name }}</span>{% endfor %}</div>
+          <p class="small muted">{{ group.rule.business_impact }}</p>
+        </div>{% else %}<p class="empty">No unwaived confirmed failures in scope.</p>{% endfor %}
       </div>
-      {% endfor %}
+      <div class="card">
+        <div class="section-head"><h2>Pillar health</h2><span class="small muted">Severity-weighted, known results only</span></div>
+        {% for score in scope.scores %}<div class="pillar">
+          <div class="ring" style="--p: {{ score.score if score.score is not none else 0 }}"><strong>{{ score.score if score.score is not none else "N/A" }}</strong></div>
+          <div><h3><button class="text-button" type="button" data-pillar="{{ score.pillar }}">{{ score.pillar }}</button></h3>
+            <div class="small muted">{{ score.failed }} fail / {{ score.passed }} pass / {{ score.unknown }} unknown / {{ score.unsupported }} unsupported / {{ score.waived }} waived / {{ score.not_applicable }} N/A</div>
+            <div class="small muted">Score based on {{ score.passed + score.failed }} of {{ score.passed + score.failed + score.unknown + score.unsupported }} applicable, unwaived checks.</div>
+            {% if score.score is none %}<small>Not assessed; not a healthy score.</small>{% endif %}
+          </div>
+        </div>{% endfor %}
+      </div>
     </div>
-    <p>Scores use severity-weighted passes divided by known pass/fail results only.
-      Critical=5, High=4, Medium=3, Low=2, Advisory=1. Portfolio scores weight individual
-      results, not instance averages. Coverage counts above must accompany every score.</p>
-    <p class="muted">Each rule contributes once per instance, not once per operation.
-      The policy matrix shows context coverage separately. Waivers retain original outcomes and evidence but are excluded from scores.</p>
-    {% if iteration in ["3", "4", "5"] %}
-    <div class="card">
-      <h3>MCSB assessed-mapping rate</h3>
-      <div class="score">{{ scope.mcsb_score if scope.mcsb_score is not none else "N/A" }}</div>
-      <p>Percentage of known pass/fail control-instance mappings passing. Warning, unsupported, waived and
-        not-applicable mappings are excluded, never passes. See the MCSB coverage matrix for the denominator.
-        This is not a complete benchmark compliance score or certification.</p>
-    </div>
-    {% endif %}
-  </section>
-  <section class="slide" data-panel="policy">
-    <p class="eyebrow">Effective policy coverage / {{ scope.title }}</p>
-    <h2>API &amp; operation execution contexts</h2>
-    <p>Product policies are evaluated separately from non-product subscription and no-subscription requests.
-      The first effective CORS policy is used. Conditional, unavailable and unsupported evidence stays unknown.</p>
-    <p class="muted">Present = configured control satisfies the check; absent = check not satisfied.
-      Backend means backend-entity routing; CORS means the wildcard-origin check.
-      This does not verify token claims, reachability, browser behavior or runtime enforcement.</p>
-    {% for instance in scope.instances %}
-    <article>
-      <h3>{{ instance.name }}</h3>
-      {% if instance.inventory %}
-      <details><summary>Sub-resource collection coverage</summary>
-      {% for path, coverage in instance.inventory.collections.items() %}
-        <p><code>{{ path }}</code>: {{ coverage.status }} / {{ coverage.count }} observed</p>
-      {% endfor %}
-      </details>
-      {% else %}<p>Sub-resource inventory was not collected. Policy coverage is unknown.</p>{% endif %}
-    </article>
-    {% endfor %}
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>APIM / API / operation</th><th>Context</th><th>Inheritance</th><th>Caller authentication</th><th>JWT / Entra</th><th>Rate / concurrency</th><th>CORS</th><th>Backend entity</th></tr></thead>
-        <tbody>
-        {% for row in scope.policy_coverage %}
-        <tr>
-          <td><code>{{ row.resource_id }}</code><br><code>{{ row.operation_path or row.api_path }}</code>
-            {% if row.http_gateway_only %}<p>API type omitted: HTTP(S) gateway policies only; resolver-specific policies not assessed.</p>{% endif %}
-            {% for issue in row.issues %}<p>{{ issue }}</p>{% endfor %}</td>
-          <td>{{ row.product_path or "Non-product" }}<br>
-            {% if row.subscription_required is sameas true %}Subscription context
-            {% elif row.subscription_required is sameas false %}No subscription required
-            {% else %}Subscription requirement unknown{% endif %}
-          </td>
-          <td>{{ row.inheritance }}</td><td>{{ row.authentication }}</td><td>{{ row.jwt }}</td>
-          <td>{{ row.rate_limit }}</td><td>{{ row.cors }}</td><td>{{ row.backend }}</td>
-        </tr>
-        {% else %}<tr><td colspan="8">No collected API contexts. Check inventory coverage before interpreting this as an empty service.</td></tr>{% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </section>
-  <section class="slide" data-panel="mcsb">
-    <p class="eyebrow">MCSB mapped coverage / {{ scope.title }}</p>
-    <h2>Partial evidence, explicit gaps</h2>
-    <p>Microsoft flags the APIM MCSB v1 baseline as potentially outdated. Current APIM documentation governs
-      feature decisions. Mappings cover only the implemented configuration checks, not whole controls.</p>
-    <p>A control-instance row fails if any unwaived mapped check fails, warns for unavailable,
-      unsupported or waived evidence, and passes only when every applicable unwaived mapped check passes.
-      A row contributes once, regardless of how many rules map to it.</p>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>APIM / control</th><th>Status</th><th>Pass / fail</th><th>Unknown / unsupported / waived / N/A</th><th>Mapped rules</th></tr></thead>
-        <tbody>
-        {% for row in scope.mcsb_coverage %}
-        <tr><td><code>{{ row.resource_id }}</code><br>{{ row.control }}</td>
-          <td class="{{ row.status }}">{{ row.status }}</td><td>{{ row.passed }} / {{ row.failed }}</td>
-          <td>{{ row.unknown }} / {{ row.unsupported }} / {{ row.waived }} / {{ row.not_applicable }}</td>
-          <td>{{ row.rule_ids | join(", ") }}</td></tr>
-        {% else %}<tr><td colspan="5">No stored MCSB coverage for this artifact version; not a compliance pass.</td></tr>{% endfor %}
-        </tbody>
-      </table>
-    </div>
-    <p class="muted">Unimplemented controls{% if iteration != "5" %}, including upstream WAF,{% endif %} are outside this catalog,
-      not silently passed or included in the denominator.</p>
-  </section>
-  <section class="slide">
-    <p class="eyebrow">Topology &amp; metrics / {{ scope.title }}</p>
-    <h2>Collected gateway configuration</h2>
-    {% for instance in scope.instances %}
-    <article>
-      <h3>{{ instance.name }}</h3>
-      <svg viewBox="0 0 600 90" role="img" aria-label="Logical gateway topology, not verified reachability">
-        <rect class="node" x="4" y="12" width="160" height="64" rx="10"></rect>
-        <text x="20" y="49">Clients</text>
-        <line class="edge" x1="164" y1="44" x2="220" y2="44"></line>
-        <rect class="node" x="220" y="12" width="370" height="64" rx="10"></rect>
-        <text x="236" y="49">APIM / {{ instance.sku.name if instance.sku else "uncollected SKU" }}</text>
-      </svg>
-      <p>Primary region: {{ instance.location or "Not collected" }} /
-        Units: {{ instance.sku.capacity if instance.sku and instance.sku.capacity is not none else "Not collected" }} /
-        Zones: {{ instance.zones if instance.zones is not none else "Not collected" }}</p>
-      <p>Additional locations: {{ instance.additional_locations if instance.additional_locations is not none else "Not collected" }}</p>
-      <p>VNet mode: {{ instance.virtual_network_type or "Not collected" }} /
-        Public network access: {{ instance.public_network_access or "Not collected" }} /
-        Private endpoint states: {{ instance.private_endpoint_statuses if instance.private_endpoint_statuses is not none else "Not collected" }}</p>
-      <p class="muted">Logical configuration only. Linked NSG metadata is not proof of WAF, routing or runtime reachability.</p>
-      {% if iteration in ["4", "5"] %}
-      <h3>Adjacent signal coverage</h3>
-      <p>Networking: {{ instance.networking.status if instance.networking else "not collected" }} /
-        Injected subnets: {{ instance.networking.subnets_status if instance.networking else "not collected" }} /
-        Log Analytics: {{ instance.log_analytics.status if instance.log_analytics else "not collected" }}</p>
-      {% if instance.networking %}
-      {% for endpoint in instance.networking.private_endpoints %}
-      <p>Private endpoint {{ endpoint.reference }}: {{ endpoint.status }} / approved={{ endpoint.approved }} / subnet linkage={{ endpoint.subnet_linked }}.</p>
-      {% endfor %}
-      {% for address in instance.networking.public_ips %}
-      <p>Public IP {{ address.reference }}: {{ address.status }} / DDoS mode={{ address.ddos_mode if address.ddos_mode else "unknown" }} / inherited VNet protection={{ address.vnet_ddos_enabled }}.</p>
-      {% endfor %}
-      <p class="muted">Only explicitly linked public IP resources are probed. No link is not evidence that DDoS protection is absent.</p>
-      {% endif %}
-      {% if instance.governance %}
-      <p>Resource diagnostics: {{ instance.governance.diagnostics_status }} /
-        Autoscale: {{ instance.governance.autoscale_status }} /
-        Defender: {{ instance.governance.defender_status }} /
-        Policy states: {{ instance.governance.policy_status }}</p>
-      {% endif %}
-      {% if instance.log_analytics %}
-      {% for workspace in instance.log_analytics.workspaces %}
-      <p>Log sample {{ workspace.workspace }} / {{ workspace.table }}: {{ workspace.status }}.</p>
-      {% if workspace.aggregate %}
-      <p>Logged requests={{ workspace.aggregate.requests }} /
-        TLS-known={{ workspace.aggregate.tls_known }}, legacy TLS={{ workspace.aggregate.weak_tls }} /
-        Gateway 5xx={{ workspace.aggregate.gateway_5xx }}, backend 5xx={{ workspace.aggregate.backend_5xx }} /
-        Backend p95={{ workspace.aggregate.backend_p95_ms if workspace.aggregate.backend_p95_ms is not none else "unknown" }} ms /
-        Cache hits={{ workspace.aggregate.cache_hits }}, misses={{ workspace.aggregate.cache_misses }}.
+    {% set watch = namespace(rows=[]) %}
+    {% for finding in failures %}{% if finding.environment == "non-prod" and finding.rule.severity in ["Critical", "High"] and severities.index(finding.severity) > severities.index(finding.rule.severity) %}{% set watch.rows = watch.rows + [finding] %}{% endif %}{% endfor %}
+    {% if watch.rows %}<div class="card notice">
+      <h2>Before promoting to production</h2>
+      <p class="small muted">Unwaived failures rated lower than the rule's High/Critical production default. Saved overrides still take precedence; these defaults are not a reassessment.</p>
+      <div class="table-wrap"><table><thead><tr><th>Rule</th><th>Instance</th><th>As assessed</th><th>Production default</th></tr></thead><tbody>
+      {% for finding in watch.rows %}<tr><td>{{ open_rule(finding.rule.id, finding.rule.title, finding.resource_id) }}</td><td>{{ identities[finding.resource_id].name }}</td><td>{{ finding.severity }}</td><td>{{ finding.rule.severity }}</td></tr>{% endfor %}
+      </tbody></table></div>
+    </div>{% endif %}
+    <h2>Environments in scope</h2>
+    <div class="grid g2">
+    {% for instance in scope.instances %}<article class="card">
+      <div class="section-head"><h3>{{ instance.name }}</h3><span class="chip">{{ instance.environment }}</span></div>
+      <p class="small muted">{{ instance.resource_id.split('/')[4] }} / {{ instance.location or "Location not collected" }}</p>
+      <dl class="kv">
+        <dt>SKU / units</dt><dd>{{ instance.sku.name if instance.sku else "Not collected" }} / {{ instance.sku.capacity if instance.sku and instance.sku.capacity is not none else "Not collected" }}</dd>
+        <dt>Zones</dt><dd>{{ instance.zones if instance.zones is not none else "Not collected" }}</dd>
+        <dt>Network</dt><dd>VNet: {{ instance.virtual_network_type or "Not collected" }} / public access: {{ instance.public_network_access or "Not collected" }}</dd>
+        <dt>Classification</dt><dd>{{ instance.environment_source }}</dd>
+        <dt>Core collection</dt><dd>{{ instance.core_status }}</dd>
+        <dt>Inventory</dt><dd>{% if instance.inventory %}{{ instance.inventory.resources | selectattr("kind", "equalto", "api") | list | length }} APIs / {{ instance.inventory.resources | selectattr("kind", "equalto", "operation") | list | length }} operations observed{% else %}Not collected{% endif %}</dd>
+      </dl>
+      {% for warning in warnings.rows if warning.resource_id == instance.resource_id %}<p class="notice small"><strong>{{ warning.module }} / {{ warning.code }}</strong>: {{ warning.message }}</p>{% endfor %}
+      <details><summary>Topology, signal coverage &amp; telemetry</summary>
+        <code>{{ instance.resource_id }}</code>
+        <svg viewBox="0 0 600 90" role="img" aria-label="Logical gateway topology, not verified reachability">
+          <rect class="node" x="4" y="12" width="160" height="64" rx="10"></rect><text x="20" y="49">Clients</text>
+          <line class="edge" x1="164" y1="44" x2="220" y2="44"></line>
+          <rect class="node" x="220" y="12" width="370" height="64" rx="10"></rect><text x="236" y="49">APIM / {{ instance.sku.name if instance.sku else "uncollected SKU" }}</text>
+        </svg>
+        <p>Additional locations: {{ instance.additional_locations if instance.additional_locations is not none else "Not collected" }} / Private endpoint states: {{ instance.private_endpoint_statuses if instance.private_endpoint_statuses is not none else "Not collected" }}</p>
+        <p>Networking: {{ instance.networking.status if instance.networking else "not collected" }} / Log Analytics: {{ instance.log_analytics.status if instance.log_analytics else "not collected" }}</p>
+        {% if instance.networking %}
+        {% for endpoint in instance.networking.private_endpoints %}<p>Private endpoint {{ endpoint.reference }}: {{ endpoint.status }} / approved={{ endpoint.approved }} / subnet linkage={{ endpoint.subnet_linked }}.</p>{% endfor %}
+        {% for address in instance.networking.public_ips %}<p>Public IP {{ address.reference }}: {{ address.status }} / DDoS mode={{ address.ddos_mode if address.ddos_mode else "unknown" }} / inherited VNet protection={{ address.vnet_ddos_enabled }}.</p>{% endfor %}
+        {% endif %}
+        {% if instance.governance %}<p>Resource diagnostics: {{ instance.governance.diagnostics_status }} / Autoscale: {{ instance.governance.autoscale_status }} / Defender: {{ instance.governance.defender_status }} / Policy states: {{ instance.governance.policy_status }}</p>{% endif %}
+        {% if instance.log_analytics %}{% for workspace in instance.log_analytics.workspaces %}
+        <p>Log sample {{ workspace.workspace }} / {{ workspace.table }}: {{ workspace.status }}.</p>
+        {% if workspace.aggregate %}<p>Logged requests={{ workspace.aggregate.requests }} / TLS-known={{ workspace.aggregate.tls_known }}, legacy TLS={{ workspace.aggregate.weak_tls }} / Gateway 5xx={{ workspace.aggregate.gateway_5xx }}, backend 5xx={{ workspace.aggregate.backend_5xx }} / Backend p95={{ workspace.aggregate.backend_p95_ms if workspace.aggregate.backend_p95_ms is not none else "unknown" }} ms / Cache hits={{ workspace.aggregate.cache_hits }}, misses={{ workspace.aggregate.cache_misses }}.
         {% set cache_total = workspace.aggregate.cache_hits + workspace.aggregate.cache_misses %}
-        Cache hit ratio={{ "%.1f%%" | format(100 * workspace.aggregate.cache_hits / cache_total) if cache_total else "not observed" }}.</p>
-      {% endif %}
-      {% endfor %}
-      {% endif %}
-      <p class="muted">Log counts describe recorded samples, not all callers. Workspaces/tables are not added together.
-        Raw callers, URLs, request/response bodies, headers and log rows are not saved.</p>
-      {% endif %}
-      <div class="table-wrap">
-      <table>
-        <thead><tr><th>Metric / region</th><th>Status</th><th>Samples</th><th>Mean hourly average</th><th>Peak maximum</th><th>Total</th></tr></thead>
-        <tbody>
-        {% for metric in metric_summary(instance) %}
-        <tr><td>{{ metric.name }} / {{ metric.location }} ({{ metric.unit }})</td><td>{{ metric.status }}</td><td>{{ metric.samples }}</td><td>{{ metric.average }}</td><td>{{ metric.maximum }}</td><td>{{ metric.total }}</td></tr>
-        {% else %}<tr><td colspan="6">No telemetry collected.</td></tr>{% endfor %}
-        </tbody>
-      </table>
-      </div>
-    </article>
-    {% endfor %}
-  </section>
-  {% if iteration == "5" %}
-  <section class="slide" data-panel="modern">
-    <p class="eyebrow">Upstream WAF &amp; AI gateway / {{ scope.title }}</p>
-    <h2>Matched paths, explicit evidence limits</h2>
-    <p>Upstream matching uses observed gateway hostnames/IPs in the authorized scope, not DNS traversal.
-      A WAF attachment alone is not origin lockdown. HTTPS forwarding, bot/rate controls and probes
-      are configuration observations, not live traffic tests.</p>
-    {% for instance in scope.instances %}
-    <article>
-      <h3>{{ instance.name }}</h3>
-      {% if instance.upstream %}
-      {% for provider, probe in [("Front Door", instance.upstream.afd), ("Application Gateway", instance.upstream.appgw)] %}
-      <h4>{{ provider }}: {{ probe.status }} / {{ probe.candidates }} candidate(s)</h4>
-      {% for route in probe.routes %}
-      <details>
-        <summary>Matched route <code>{{ route.reference }}</code></summary>
-        <p>Source network restriction: {{ route.network_restricted }} /
-          HTTPS-only: {{ route.https_only }} / explicit HTTPS probe: {{ route.health_probe }}.</p>
-        {% if route.waf %}
-        <p>WAF enabled: {{ route.waf.enabled }} / Prevention: {{ route.waf.prevention }} /
-          blocking managed rules: {{ route.waf.managed_rules }} /
-          bot rules: {{ route.waf.bot_protection }} / rate-limit rule: {{ route.waf.rate_limiting }}.</p>
-        {% else %}<p>WAF metadata unavailable; protection is not established.</p>{% endif %}
+        Cache hit ratio={{ "%.1f%%" | format(100 * workspace.aggregate.cache_hits / cache_total) if cache_total else "not observed" }}.</p>{% endif %}
+        {% endfor %}{% endif %}
+        <p class="small muted">Configuration, not reachability proof. No public IP link does not prove DDoS protection absent. Log counts describe recorded samples; workspaces/tables are not added together.</p>
+        <div class="table-wrap"><table><thead><tr><th>Metric / region</th><th>Status</th><th>Samples</th><th>Mean hourly average</th><th>Peak maximum</th><th>Total</th></tr></thead><tbody>
+        {% for metric in metric_summary(instance) %}<tr><td>{{ metric.name }} / {{ metric.location }} ({{ metric.unit }})</td><td>{{ metric.status }}</td><td>{{ metric.samples }}</td><td>{{ metric.average }}</td><td>{{ metric.maximum }}</td><td>{{ metric.total }}</td></tr>{% else %}<tr><td colspan="6">No telemetry collected.</td></tr>{% endfor %}
+        </tbody></table></div>
       </details>
-      {% else %}<p>No matched route observed; this does not prove WAF absence.</p>{% endfor %}
-      {% endfor %}
-      {% else %}<p>Upstream probes were not collected.</p>{% endif %}
-    </article>
-    {% endfor %}
-    <h3>Modern workload control observations</h3>
-    <p>Endpoint classification is heuristic and secret-free. Unknown custom endpoints are not assumed
-      to be Azure OpenAI; managed identity is not prescribed for third-party LLM providers.
-      No model prompts/responses or inference calls are collected.</p>
-    {% for finding in scope.findings if finding.rule.id.startswith("APIM-AIGW-") %}
-    <details class="card">
-      <summary>{{ finding.rule.id }} / {{ finding.result.outcome }} / {{ finding.severity }} /
-        <code>{{ finding.resource_id }}</code></summary>
-      {% if finding.waiver_justification %}<p>Waived: {{ finding.waiver_justification }}</p>{% endif %}
-      <p>{{ finding.result.summary }}</p>
-      {% for evidence in finding.result.evidence %}<p>{{ evidence.detail }}</p>{% endfor %}
-    </details>
-    {% endfor %}
-  </section>
-  <section class="slide" data-panel="roadmap">
-    <p class="eyebrow">Prioritized remediation / {{ scope.title }}</p>
-    <h2>30 / 60 / 90-day planning roadmap</h2>
-    <p>Deterministic severity-first planning buckets, not delivery commitments or effort estimates.
-      Validate business risk, dependencies and change windows with owners. Only unwaived failures
-      appear below; unknown/unsupported coverage still needs investigation in the explorer.</p>
-    {% for title, items in roadmap(scope.findings) %}
-    <article>
-      <h3>{{ title }}</h3>
-      {% for finding in items %}
-      <details>
-        <summary>{{ finding.severity }} / {{ finding.rule.id }} / {{ finding.rule.title }} /
-          <code>{{ finding.resource_id }}</code></summary>
-        <p>{{ finding.rule.business_impact }}</p>
-        <p>{{ finding.rule.remediation }}</p>
-      </details>
-      {% else %}<p>No unwaived confirmed failures in this planning bucket.</p>{% endfor %}
-    </article>
-    {% endfor %}
-    {% if scope.portfolio %}
-    <article>
-      <h3>Optional AI executive commentary</h3>
-      <p>Aggregate-only portfolio commentary is unverified synthesis, not assessment evidence.
-        Findings, applicability, severity, waivers and scores remain deterministic and unchanged.</p>
-      {% if narrative and narrative.status == "complete" %}
-      <p>{{ narrative.text }}</p>
-      {% elif narrative %}<p>Enrichment unavailable: {{ narrative.error_code }}. No generated text was retained.</p>
-      {% else %}<p>Not requested. This report and roadmap require no AI service.</p>{% endif %}
-    </article>
-    {% endif %}
-  </section>
-  {% endif %}
-  <section class="slide findings-panel" data-panel="findings">
-    <p class="eyebrow">Rule results / {{ scope.title }}</p>
-    <h2>Evidence &amp; remediation</h2>
-    <div class="explorer-filters">
-      <div class="filters">
-        <label>Search<input class="filter-search" type="search" placeholder="Rule, resource, evidence or remediation" aria-label="Search findings"></label>
-        <label>Pillar<select class="filter-pillar"><option value="">All pillars</option>{% for pillar in ["REL", "SEC", "COST", "OPS", "PERF"] %}<option>{{ pillar }}</option>{% endfor %}</select></label>
-        <label>Severity<select class="filter-severity"><option value="">All severities</option>{% for severity in ["Critical", "High", "Medium", "Low", "Advisory"] %}<option>{{ severity }}</option>{% endfor %}</select></label>
-        <label>MCSB control<select class="filter-control"><option value="">All controls</option>{% for control in scope.controls %}<option>{{ control }}</option>{% endfor %}</select></label>
-        <label>Affected API<select class="filter-api"><option value="">All APIs / service-wide</option>{% for api in scope.apis %}<option>{{ api }}</option>{% endfor %}</select></label>
-        <label>Outcome<select class="filter-outcome"><option value="">All outcomes</option>{% for outcome in ["fail", "pass", "unknown", "unsupported", "not_applicable", "waived"] %}<option>{{ outcome }}</option>{% endfor %}</select></label>
-        <button type="button" class="reset-filters">Reset filters</button>
-      </div>
-      <p class="filter-count" role="status" aria-live="polite"></p>
-      <p class="filter-empty" hidden>No findings match these filters. Hidden results do not change scores or assessment coverage.</p>
+    </article>{% endfor %}
     </div>
-    {% for finding in scope.findings %}
-    <article class="finding" data-pillar="{{ finding.rule.pillar }}" data-severity="{{ finding.severity }}"
-      data-controls="{{ finding.rule.mcsb_controls | join(' ') }}" data-apis="{{ finding_apis(finding) | join('\n') }}"
-      data-outcome="{{ 'waived' if finding.waiver_justification is not none else finding.result.outcome }}">
-      <details>
+  </section>
+  <section class="panel" id="scope-{{ s }}-findings" data-panel="findings" role="tabpanel" aria-labelledby="tab-findings" tabindex="0" hidden>
+    <div class="section-head"><div><h2>Findings</h2><p class="small muted">One row per rule. Instance chips retain each result; expand for what was checked, why it matters, the fix and grouped evidence.</p></div>
+      <div class="presets">{% for key, label in [("fail", "Confirmed issues"), ("gaps", "Needs verification"), ("pass", "Passing"), ("all", "Everything")] %}<button type="button" class="preset" data-preset="{{ key }}">{{ label }}</button>{% endfor %}</div>
+    </div>
+    <div class="card filters">
+      <label>Search<input class="filter-search" type="search" placeholder="Rule, API, evidence or remediation" aria-label="Search findings"></label>
+      <label>Pillar<select class="filter-pillar"><option value="">All pillars</option>{% for pillar in ["REL", "SEC", "COST", "OPS", "PERF"] %}<option>{{ pillar }}</option>{% endfor %}</select></label>
+      <label>Severity<select class="filter-severity"><option value="">Any severity</option>{% for severity in severities %}<option>{{ severity }}</option>{% endfor %}</select></label>
+      <label>MCSB control<select class="filter-control"><option value="">Any MCSB control</option>{% for control in scope.controls %}<option>{{ control }}</option>{% endfor %}</select></label>
+      <label>Affected API<select class="filter-api"><option value="">All APIs / service-wide</option>{% for api in scope.apis %}<option>{{ api }}</option>{% endfor %}</select></label>
+      <button type="button" class="reset-filters">Reset filters</button>
+      <div class="outcome-toggles" role="group" aria-label="Finding outcomes">{% for outcome in outcomes %}<button type="button" data-outcome="{{ outcome }}" aria-pressed="{{ 'true' if outcome == 'fail' else 'false' }}">{{ "N/A" if outcome == "not_applicable" else outcome | capitalize }}</button>{% endfor %}</div>
+    </div>
+    <p class="filter-count small muted" role="status" aria-live="polite"></p>
+    <p class="filter-empty card empty" hidden>No findings match these filters. Hidden results do not change scores or assessment coverage.</p>
+    {% for group in groups %}
+    {% set g = loop.index0 %}
+    <details class="finding" id="finding-{{ s }}-{{ group.rule.id }}" data-rule="{{ group.rule.id }}" data-pillar="{{ group.rule.pillar }}" data-controls="{{ group.rule.mcsb_controls | join(' ') }}">
       <summary>
-      <span class="badge {{ finding.result.outcome }}">{{ finding.result.outcome }}</span> / {{ finding.severity }} / {{ finding.rule.pillar }} / {{ finding.rule.id }}<br>
-      <strong>{{ finding.rule.title }}</strong><br>
-      <code>{{ finding.resource_id }}</code>
+        <div>{{ badge(group.outcome) }}</div>
+        <div><strong>{{ group.rule.title }}</strong><div class="line small"><span class="badge">{{ group.severity }}</span><span class="tag">{{ group.rule.pillar }}</span>{% for control in group.rule.mcsb_controls %}<span class="chip">{{ control }}</span>{% endfor %}<code>{{ group.rule.id }}</code></div></div>
+        <div class="instance-chips">{% for finding in group.findings %}<span class="chip {{ display_outcome(finding) }}">{{ identities[finding.resource_id].name }} / {{ display_outcome(finding) }}</span>{% endfor %}</div>
       </summary>
-      <div>
-      {% if finding.waiver_justification is not none %}<p class="notice"><strong>Waived (excluded from scores):</strong> {{ finding.waiver_justification }}. Original outcome and evidence retained.</p>{% endif %}
-      <p>{{ finding.result.summary }}</p>
-      {% for evidence in finding.result.evidence %}<p><strong>{{ evidence.source }}</strong>: {{ evidence.detail }}</p>{% endfor %}
-      <p><strong>Business impact:</strong> {{ finding.rule.business_impact }}</p>
-      <p><strong>Remediation:</strong> {{ finding.rule.remediation }}</p>
-      <p><strong>Applicability:</strong> {{ finding.rule.applicability }}</p>
-      {% if finding.rule.mcsb_controls %}<p>MCSB mapping (partial configuration evidence): {{ finding.rule.mcsb_controls | join(", ") }}</p>{% endif %}
-      {% for reference in finding.rule.references %}<p><a href="{{ reference }}" rel="noreferrer">{{ reference }}</a></p>{% endfor %}
+      <div class="finding-body">
+        <div class="grid g3 explanation">
+          <div><h4>What was checked</h4>{{ group.rule.description }}</div>
+          <div><h4>Why it matters</h4>{{ group.rule.business_impact }}</div>
+          <div><h4>Recommended fix</h4>{{ group.rule.remediation }}</div>
+        </div>
+        <div class="instance-tabs" role="tablist" aria-label="Instance results for {{ group.rule.id }}">{% for finding in group.findings %}<button type="button" role="tab" id="instance-tab-{{ s }}-{{ g }}-{{ loop.index0 }}" data-instance="{{ loop.index0 }}" aria-controls="instance-result-{{ s }}-{{ g }}-{{ loop.index0 }}" aria-selected="{{ 'true' if loop.first else 'false' }}" tabindex="{{ 0 if loop.first else -1 }}">{{ identities[finding.resource_id].name }} / {{ display_outcome(finding) }}</button>{% endfor %}</div>
+        {% for finding in group.findings %}
+        <div class="instance-result" role="tabpanel" id="instance-result-{{ s }}-{{ g }}-{{ loop.index0 }}" aria-labelledby="instance-tab-{{ s }}-{{ g }}-{{ loop.index0 }}" tabindex="0" data-resource="{{ finding.resource_id }}" data-outcome="{{ display_outcome(finding) }}" data-severity="{{ finding.severity }}" data-apis="{{ finding_apis(finding) | join('\n') }}"{% if not loop.first %} hidden{% endif %}>
+          <div class="line"><strong>{{ identities[finding.resource_id].name }}</strong>{{ badge(finding.result.outcome) }}<strong>{{ finding.severity }}</strong><span class="small muted">{{ finding.environment }} / production default: {{ finding.rule.severity }}</span></div>
+          <p>{{ finding.result.summary }}</p>
+          <p class="small mono">{{ finding.resource_id }}</p>
+          {% if finding.waiver_justification is not none %}<p class="notice"><strong>Waived (excluded from scores):</strong> {{ finding.waiver_justification }}. Original outcome and evidence retained.</p>{% endif %}
+          {% set patterns = evidence_patterns(finding.result.evidence) %}
+          <p class="small muted">{{ finding.result.evidence | length }} evidence items grouped into {{ patterns | length }} exact patterns. Expand a pattern for every source and affected item.</p>
+          {% for pattern in patterns %}<details class="evidence-pattern">
+            <summary><strong>{{ pattern["items"] | length }} items</strong> / <code>{{ pattern.detail }}</code></summary>
+            <ul>{% for evidence in pattern["items"] %}<li><strong>{{ evidence.source }}</strong>{% if evidence.api_path %} / <code>{{ evidence.api_path }}</code>{% endif %}</li>{% endfor %}</ul>
+          </details>{% else %}<p class="small muted">No evidence items recorded. Read the result summary and collection coverage.</p>{% endfor %}
+        </div>{% endfor %}
+        <p class="small muted"><strong>Applies to:</strong> {{ group.rule.applicability }} / production default: {{ group.rule.severity }} / non-prod default: {{ group.rule.non_prod_severity }}. Saved severity overrides take precedence.</p>
+        <ul class="small">{% for reference in group.rule.references %}<li><a href="{{ reference }}" rel="noreferrer">{{ reference }}</a></li>{% endfor %}</ul>
       </div>
-      </details>
+    </details>{% endfor %}
+  </section>
+  <section class="panel" id="scope-{{ s }}-gaps" data-panel="gaps" role="tabpanel" aria-labelledby="tab-gaps" tabindex="0" hidden>
+    <div class="section-head"><div><h2>Verification gaps</h2><p class="small muted">Every unwaived unknown/unsupported result, including rules that fail on another instance. These are not passes. Ordered by production default severity.</p></div><button type="button" class="preset" data-preset="gaps">Inspect gap evidence</button></div>
+    <div class="card"><h3>Collection warnings</h3>
+      {% for warning in warnings.rows %}<p class="notice small"><strong>{{ warning.module }} / {{ warning.code }}</strong>: {{ warning.message }} <code>{{ warning.resource_id }}</code></p>{% else %}<p>No collection warnings recorded for this scope. This alone does not establish complete evidence.</p>{% endfor %}
+    </div>
+    <div class="card table-wrap"><table><thead><tr><th>Production default</th><th>Rule</th><th>Instance / outcome</th><th>Why it could not be determined</th></tr></thead><tbody>
+    {% for severity in severities %}{% for finding in gaps if finding.rule.severity == severity %}<tr><td>{{ finding.rule.severity }}</td><td>{{ open_rule(finding.rule.id, finding.rule.title, finding.resource_id) }}<br><code>{{ finding.rule.id }}</code></td><td>{{ identities[finding.resource_id].name }}<br>{{ badge(finding.result.outcome) }}</td><td>{{ finding.result.summary }}</td></tr>{% endfor %}{% endfor %}
+    {% if not gaps %}<tr><td colspan="4">No unwaived unknown/unsupported results. Check warnings, waivers and applicability before interpreting coverage.</td></tr>{% endif %}
+    </tbody></table></div>
+  </section>
+  <section class="panel" id="scope-{{ s }}-roadmap" data-panel="roadmap" role="tabpanel" aria-labelledby="tab-roadmap" tabindex="0" hidden>
+    <h2>30 / 60 / 90-day planning roadmap</h2>
+    <p class="small muted">Deterministic severity-first planning buckets, not delivery commitments or effort estimates. Only unwaived confirmed failures. Validate business risk, dependencies and change windows with owners.</p>
+    <div class="grid g3">{% for title, items in roadmap(scope.findings) %}<article class="card lane">
+      <h3>{{ title }}</h3><p class="small muted">{{ group_findings(items) | length }} rules / {{ items | length }} instance results</p>
+      {% for group in group_findings(items) %}<div class="roadmap-item">
+        <div class="line"><span class="badge fail">{{ group.severity }}</span><span class="tag">{{ group.rule.pillar }}</span></div>
+        <h3>{{ open_rule(group.rule.id, group.rule.title) }}</h3><p class="small">{{ group.rule.remediation }}</p>
+        {% for finding in group.findings %}<p class="small">{{ identities[finding.resource_id].name }} / {{ finding.severity }}</p>{% endfor %}
+      </div>{% else %}<p class="empty">No unwaived confirmed failures in this planning bucket.</p>{% endfor %}
+    </article>{% endfor %}</div>
+    {% if scope.portfolio %}<article class="card">
+      <h3>Optional AI executive commentary</h3><p class="small muted">Aggregate-only, unverified synthesis; not assessment evidence. Findings, applicability, severity, waivers and scores remain deterministic and unchanged.</p>
+      {% if narrative and narrative.status == "complete" %}<p>{{ narrative.text }}</p>{% elif narrative %}<p>Enrichment unavailable: {{ narrative.error_code }}. No generated text was retained.</p>{% else %}<p>Not requested. This report and roadmap require no AI service.</p>{% endif %}
+    </article>{% endif %}
+  </section>
+  <section class="panel" id="scope-{{ s }}-mcsb" data-panel="mcsb" role="tabpanel" aria-labelledby="tab-mcsb" tabindex="0" hidden>
+    <h2>Microsoft cloud security benchmark / mapped controls</h2>
+    <p>A control-instance row fails if any unwaived mapped check fails, warns for unavailable, unsupported or waived evidence, and passes only when every applicable unwaived mapped check passes.</p>
+    <p class="small muted">Mapped pass rate: {{ scope.mcsb_score if scope.mcsb_score is not none else "N/A" }}. {{ scope.mcsb_coverage | selectattr("status", "in", ["pass", "fail"]) | list | length }} of {{ scope.mcsb_coverage | length }} mappings determinable. Not a complete benchmark compliance score or certification. The APIM MCSB v1 baseline may be outdated; mappings cover implemented configuration checks only.</p>
+    <div class="card table-wrap"><table><thead><tr><th>Control</th>{% for instance in scope.instances %}<th>{{ instance.name }}</th>{% endfor %}</tr></thead><tbody>
+    {% if scope.mcsb_coverage %}{% for control in scope.controls %}<tr><td><strong>{{ control }}</strong></td>
+      {% for instance in scope.instances %}<td>
+        {% for row in scope.mcsb_coverage if row.control == control and row.resource_id == instance.resource_id %}
+        {{ badge(row.status) }}<p class="small muted">{{ row.passed }} pass / {{ row.failed }} fail<br>{{ row.unknown }} unknown / {{ row.unsupported }} unsupported / {{ row.waived }} waived / {{ row.not_applicable }} N/A</p>
+        <div class="small">{% for id in row.rule_ids %}{{ open_rule(id, id, row.resource_id) }}{{ ", " if not loop.last }}{% endfor %}</div>
+        {% else %}<span class="muted">No stored mapping</span>{% endfor %}
+      </td>{% endfor %}
+    </tr>{% endfor %}{% else %}<tr><td colspan="{{ scope.instances | length + 1 }}">No stored MCSB coverage for this artifact version; not a compliance pass.</td></tr>{% endif %}
+    </tbody></table></div>
+  </section>
+  <section class="panel" id="scope-{{ s }}-policy" data-panel="policy" role="tabpanel" aria-labelledby="tab-policy" tabindex="0" hidden>
+    <h2>Effective policy coverage / API summary</h2>
+    <p class="small muted">Each API rolls up every operation and product/non-product execution context. Present = configured control satisfies the check; absent = check not satisfied. CORS means the wildcard-origin check. Counts are contexts, not API health scores or runtime proof.</p>
+    {% for api in policy_summary(scope.policy_coverage) %}<article class="card policy-api">
+      <h3>{{ api.api_path }}</h3><p class="small muted">{{ identities[api.resource_id].name }} / {{ api.operations }} operations / {{ api.rows | length }} contexts</p>
+      <div class="table-wrap"><table><thead><tr>{% for label in policy_controls.values() %}<th>{{ label }}</th>{% endfor %}</tr></thead><tbody><tr>
+      {% for control in policy_controls %}<td><div class="bar" role="img" aria-label="{% for state in ['present', 'absent', 'unknown', 'not_applicable'] %}{{ state }} {{ api.counts[control].get(state, 0) }}{{ ', ' if not loop.last }}{% endfor %}">{% for state, count in api.counts[control].items() %}<span class="c-{{ state }}" style="width: {{ 100 * count / api.rows | length }}%"></span>{% endfor %}</div>{% for state in ["present", "absent", "unknown", "not_applicable"] %}<div class="small">{{ state }}: {{ api.counts[control].get(state, 0) }}</div>{% endfor %}</td>{% endfor %}
+      </tr></tbody></table></div>
+      <details><summary>Operation / execution-context detail</summary>
+      <div class="table-wrap"><table><thead><tr><th>Operation / context</th>{% for label in policy_controls.values() %}<th>{{ label }}</th>{% endfor %}</tr></thead><tbody>
+      {% for row in api.rows %}<tr><td><code>{{ row.operation_path or row.api_path }}</code><br>{{ row.product_path or "Non-product" }} / subscription required: {{ row.subscription_required }}
+        {% if row.http_gateway_only %}<p>API type omitted: HTTP(S) gateway policies only; resolver-specific policies not assessed.</p>{% endif %}{% for issue in row.issues %}<p>{{ issue }}</p>{% endfor %}</td>
+        <td>{{ row.authentication }}</td><td>{{ row.jwt }}</td><td>{{ row.rate_limit }}</td><td>{{ row.inheritance }}</td><td>{{ row.cors }}</td><td>{{ row.backend }}</td></tr>{% endfor %}
+      </tbody></table></div></details>
+    </article>{% else %}<p class="notice">No collected API contexts. Check inventory coverage before interpreting this as an empty service.</p>{% endfor %}
+    <details class="card"><summary>Sub-resource collection coverage</summary>{% for instance in scope.instances %}<h3>{{ instance.name }}</h3>{% if instance.inventory %}{% for path, coverage in instance.inventory.collections.items() %}<p><code>{{ path }}</code>: {{ coverage.status }} / {{ coverage.count }} observed</p>{% endfor %}{% else %}<p>Sub-resource inventory was not collected. Policy coverage is unknown.</p>{% endif %}{% endfor %}</details>
+  </section>
+  <section class="panel" id="scope-{{ s }}-method" data-panel="method" role="tabpanel" aria-labelledby="tab-method" tabindex="0" hidden>
+    <div class="grid g2">
+      <article class="card"><h2>How to read this report</h2>
+        <p><strong>Outcomes.</strong> Fail confirms a configuration gap. Unknown/unsupported evidence is never a pass. N/A means the rule does not apply; waived results retain original outcomes but are excluded from scoring and priorities.</p>
+        <p><strong>Severity.</strong> Instance classification and saved overrides determine assessed severity. Production/non-prod defaults are context, not a second assessment.</p>
+        <p><strong>Scores.</strong> Severity-weighted passes divided by known pass/fail results only. Critical=5, High=4, Medium=3, Low=2, Advisory=1. Each rule contributes once per instance, not once per operation. Portfolio scores weight individual results, not instance averages.</p>
+        <p><strong>Confidence.</strong> Known pass/fail results divided by all applicable, unwaived results. Waived and N/A results are excluded from both numerator and denominator. No applicable results means N/A, not 100%.</p>
+        <p><strong>Evidence.</strong> Identical detail strings are grouped; every source/API reference is retained. No inferred pass/fail from text tokens. Filters match the same instance result; summary chips still show all instances.</p>
+        <p><strong>Limits.</strong> Policy results assess configuration, not runtime enforcement. Conditional, unavailable and unsupported evidence stays unknown. The first effective CORS policy is used. Network configuration is not reachability proof. Raw callers, URLs, request/response bodies, headers and log rows are not saved.</p>
+      </article>
+      <article class="card"><h2>Assessment parameters</h2><dl class="kv">
+        <dt>Collected</dt><dd>{{ snapshot.collected_at.isoformat() }}</dd>
+        <dt>Telemetry window (UTC)</dt><dd>{{ snapshot.telemetry_start.isoformat() }} to {{ snapshot.telemetry_end.isoformat() }}</dd>
+        <dt>Artifact schema</dt><dd>{{ schema_version }} / catalog Iteration {{ iteration }}</dd>
+        <dt>Snapshot digest</dt><dd><code>{{ snapshot_digest }}</code></dd>
+        <dt>Waivers configured</dt><dd>{{ rule_settings.waivers | length }}</dd>
+        {% for name, value in rule_settings.thresholds.model_dump().items() %}<dt>{{ name }}</dt><dd>{{ value }}</dd>{% endfor %}
+      </dl><p class="small muted">Resource-scoped waivers take precedence over global waivers; saved severity overrides take precedence over profile defaults.</p>
+      {% for id, severity in rule_settings.severity_overrides.items() %}<p><code>{{ id }}</code>: {{ severity }}</p>{% endfor %}</article>
+    </div>
+    <article class="card"><h2>Assessment scope &amp; compatibility</h2>
+      <p>{% if legacy %}Legacy findings: five service rules, no policy assessment.{% elif iteration == "2" %}Five service rules and six policy rules. Historical policy interpretations are preserved; rerun analyze to apply current checks.{% else %}Core APIM five-pillar catalog; {{ scope.findings | length }} rule results in this scope.{% endif %} Not a complete MCSB compliance assessment.</p>
+      <p>{% if iteration in ["4", "5"] %}Linked network/governance metadata and optional aggregate gateway logs are included when available.{% else %}Adjacent-network analysis remains outside this historical assessment.{% endif %} {% if iteration != "5" %}Upstream WAF and AI gateway analysis remain outside scope.{% endif %}</p>
+      {% for instance in scope.instances %}<p><strong>{{ instance.name }}</strong> / {{ instance.environment }} ({{ instance.environment_source }})<br><code>{{ instance.resource_id }}</code></p>{% endfor %}
     </article>
-    {% else %}<p>No rule results.</p>{% endfor %}
-    {% if iteration in ["3", "4", "5"] %}
-    <details><summary>Saved assessment thresholds</summary>
-      {% for name, value in rule_settings.thresholds.model_dump().items() %}<p><code>{{ name }}</code>: {{ value }}</p>{% endfor %}
-      <p>Severity overrides take precedence over profile defaults. Resource-scoped waivers take precedence over global waivers.</p>
-    </details>
-    {% endif %}
+    {% if iteration == "5" %}<article class="card">
+      <h2>Upstream WAF &amp; AI gateway</h2>
+      <p>Upstream matching uses observed gateway hostnames/IPs in the authorized scope, not DNS traversal. A WAF attachment alone is not origin lockdown. HTTPS forwarding, bot/rate controls and probes are configuration observations, not live traffic tests.</p>
+      {% for instance in scope.instances %}<h3>{{ instance.name }}</h3>
+      {% if instance.upstream %}{% for provider, probe in [("Front Door", instance.upstream.afd), ("Application Gateway", instance.upstream.appgw)] %}
+      <p><strong>{{ provider }}</strong>: {{ probe.status }} / {{ probe.candidates }} candidate(s)</p>
+      {% for route in probe.routes %}<details><summary>Matched route <code>{{ route.reference }}</code></summary>
+        <p>Source network restriction: {{ route.network_restricted }} / HTTPS-only: {{ route.https_only }} / explicit HTTPS probe: {{ route.health_probe }}.</p>
+        {% if route.waf %}<p>WAF enabled: {{ route.waf.enabled }} / Prevention: {{ route.waf.prevention }} / blocking managed rules: {{ route.waf.managed_rules }} / bot rules: {{ route.waf.bot_protection }} / rate-limit rule: {{ route.waf.rate_limiting }}.</p>{% else %}<p>WAF metadata unavailable; protection is not established.</p>{% endif %}
+      </details>{% else %}<p>No matched route observed; this does not prove WAF absence.</p>{% endfor %}
+      {% endfor %}{% else %}<p>Upstream probes were not collected.</p>{% endif %}
+      {% endfor %}
+      <p class="small muted">Endpoint classification is heuristic and secret-free. Unknown custom endpoints are not assumed to be Azure OpenAI; managed identity is not prescribed for third-party LLM providers. No model prompts/responses or inference calls are collected. Modern-workload findings are available through the rule search.</p>
+    </article>{% endif %}
   </section>
 </div>
 {% endfor %}
 </main>
-<footer>
-  <button id="previous" type="button">Previous</button>
-  <span id="position" aria-live="polite"></span>
-  <button id="next" type="button">Next</button>
-  <small>Arrow keys / Space to navigate. F for fullscreen.</small>
-  <span id="status" role="status"></span>
-</footer>
+<div id="presentation-nav" hidden><button type="button" id="previous">Previous</button><span id="position" aria-live="polite"></span><button type="button" id="next">Next</button><small>Arrow keys / Space to navigate. F for fullscreen.</small></div>
+<footer class="foot">Snapshot {{ snapshot_digest }} / self-contained, no external runtime assets. <span id="status" role="status"></span></footer>
 <script>
 (() => {
+  "use strict";
   const scopes = [...document.querySelectorAll(".scope")];
   const select = document.getElementById("scope-select");
-  const pageCount = scopes[0].querySelectorAll(".slide").length;
-  let page = 0;
-  let explorer = false;
-  let panel = "findings";
+  const tabs = [...document.querySelectorAll(".tab")];
+  const pageCount = tabs.length;
+  let view = "overview";
+  let presentation = false;
+  const activeScope = () => scopes[Number(select.value)];
   function filter(scope) {
     const search = scope.querySelector(".filter-search").value.trim().toLowerCase();
     const pillar = scope.querySelector(".filter-pillar").value;
     const severity = scope.querySelector(".filter-severity").value;
     const control = scope.querySelector(".filter-control").value;
     const api = scope.querySelector(".filter-api").value;
-    const outcome = scope.querySelector(".filter-outcome").value;
+    const outcomes = [...scope.querySelectorAll(".outcome-toggles [aria-pressed='true']")].map(b => b.dataset.outcome);
     const findings = [...scope.querySelectorAll(".finding")];
     let visible = 0;
     findings.forEach(finding => {
-      finding.hidden = explorer && !(
-        (!search || finding.textContent.toLowerCase().includes(search)) &&
-        (!pillar || finding.dataset.pillar === pillar) &&
-        (!severity || finding.dataset.severity === severity) &&
-        (!control || finding.dataset.controls.split(" ").includes(control)) &&
-        (!api || finding.dataset.apis.split("\n").includes(api)) &&
-        (!outcome || finding.dataset.outcome === outcome)
+      const common = !pillar || finding.dataset.pillar === pillar;
+      const mapped = !control || finding.dataset.controls.split(" ").includes(control);
+      const ruleText = finding.querySelector("summary strong").textContent + finding.dataset.rule + finding.dataset.controls + finding.querySelector(".explanation").textContent;
+      const matching = [...finding.querySelectorAll(".instance-result")].filter(result =>
+        outcomes.includes(result.dataset.outcome) &&
+        (!severity || result.dataset.severity === severity) &&
+        (!api || result.dataset.apis.split("\n").includes(api)) &&
+        (!search || ruleText.toLowerCase().includes(search) || result.textContent.toLowerCase().includes(search))
       );
-      if (!finding.hidden) visible++;
+      finding.hidden = !(common && mapped && matching.length);
+      if (!finding.hidden) {
+        visible++;
+        const selected = finding.querySelector(".instance-result:not([hidden])");
+        if (!matching.includes(selected)) {
+          activateInstance(finding.querySelector(`[aria-controls="${matching[0].id}"]`));
+        }
+      }
     });
-    scope.querySelector(".filter-count").textContent = `${visible} of ${findings.length} findings shown. Scores include all unwaived assessed results.`;
+    scope.querySelector(".filter-count").textContent = `${visible} of ${findings.length} rules shown. Filters do not change scores or coverage.`;
     scope.querySelector(".filter-empty").hidden = visible !== 0;
   }
-  function show() {
-    document.body.dataset.mode = explorer ? "explorer" : "slides";
-    document.getElementById("mode").textContent = explorer ? "Presentation mode" : "Deep-dive explorer";
-    document.getElementById("mode").setAttribute("aria-pressed", String(explorer));
-    document.querySelectorAll("#explorer-nav button").forEach(button => {
-      button.setAttribute("aria-pressed", String(button.dataset.panel === panel));
+  function activateInstance(button) {
+    const finding = button.closest(".finding");
+    finding.querySelectorAll("[data-instance]").forEach(tab => {
+      const selected = tab === button;
+      tab.setAttribute("aria-selected", String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+      document.getElementById(tab.getAttribute("aria-controls")).hidden = !selected;
     });
-    scopes.forEach((scope, index) => {
-      scope.hidden = index !== Number(select.value);
-      scope.querySelectorAll(".slide").forEach((slide, position) => {
-        slide.hidden = explorer ? slide.dataset.panel !== panel : position !== page;
-      });
-      filter(scope);
-    });
-    document.getElementById("position").textContent = `Slide ${page + 1} of ${pageCount}`;
-    document.getElementById("previous").disabled = page === 0;
-    document.getElementById("next").disabled = page === pageCount - 1;
   }
-  function move(delta) { page = Math.max(0, Math.min(pageCount - 1, page + delta)); show(); window.scrollTo(0, 0); }
+  function show() {
+    const scope = activeScope();
+    scopes.forEach(item => { item.hidden = item !== scope; });
+    scope.querySelectorAll(":scope > .panel").forEach(panel => { panel.hidden = panel.dataset.panel !== view; });
+    tabs.forEach(tab => {
+      const selected = tab.dataset.view === view;
+      tab.setAttribute("aria-selected", String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+      tab.setAttribute("aria-controls", `${scope.id}-${tab.dataset.view}`);
+    });
+    document.querySelector("[data-count='findings']").textContent = scope.dataset.failCount;
+    document.querySelector("[data-count='gaps']").textContent = scope.dataset.gapCount;
+    document.getElementById("mode").setAttribute("aria-pressed", String(presentation));
+    document.getElementById("mode").textContent = presentation ? "Focused report" : "Presentation mode";
+    document.body.dataset.mode = presentation ? "presentation" : "focused";
+    document.getElementById("presentation-nav").hidden = !presentation;
+    const position = tabs.findIndex(tab => tab.dataset.view === view);
+    document.getElementById("position").textContent = `Section ${position + 1} of ${pageCount}`;
+    document.getElementById("previous").disabled = position === 0;
+    document.getElementById("next").disabled = position === pageCount - 1;
+    filter(scope);
+  }
+  function setView(next, focus = false) {
+    view = next;
+    show();
+    if (focus) document.getElementById(`${activeScope().id}-${view}`).focus();
+    window.scrollTo(0, 0);
+  }
+  function preset(scope, key) {
+    scope.querySelectorAll(".filters input, .filters select").forEach(input => { input.value = ""; });
+    const selected = key === "gaps" ? ["unknown", "unsupported"] : key === "all" ? [...scope.querySelectorAll("[data-outcome][aria-pressed]")].map(b => b.dataset.outcome) : [key];
+    scope.querySelectorAll(".outcome-toggles button").forEach(button => {
+      button.setAttribute("aria-pressed", String(selected.includes(button.dataset.outcome)));
+    });
+  }
+  function move(delta) {
+    const position = tabs.findIndex(tab => tab.dataset.view === view);
+    setView(tabs[Math.max(0, Math.min(pageCount - 1, position + delta))].dataset.view, true);
+  }
   async function fullscreen() {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
@@ -529,32 +570,74 @@ footer { justify-content: center; border-top: 1px solid var(--cp-border); }
       document.getElementById("status").textContent = "Fullscreen is unavailable in this browser.";
     }
   }
-  select.addEventListener("change", () => { page = 0; show(); });
-  document.getElementById("mode").addEventListener("click", () => { explorer = !explorer; show(); });
-  document.querySelectorAll("#explorer-nav button").forEach(button => {
-    button.addEventListener("click", () => { panel = button.dataset.panel; show(); });
+  document.addEventListener("click", event => {
+    const button = event.target.closest("button");
+    if (!button) return;
+    const scope = activeScope();
+    if (button.dataset.view) { setView(button.dataset.view); return; }
+    if (button.dataset.goto) { setView(button.dataset.goto, true); return; }
+    if (button.dataset.preset) { preset(scope, button.dataset.preset); setView("findings", true); return; }
+    if (button.dataset.pillar) {
+      preset(scope, "all");
+      scope.querySelector(".filter-pillar").value = button.dataset.pillar;
+      setView("findings", true); return;
+    }
+    if (button.dataset.open) {
+      preset(scope, "all");
+      setView("findings");
+      const finding = [...scope.querySelectorAll(".finding")].find(item => item.dataset.rule === button.dataset.open);
+      if (finding) {
+        const result = [...finding.querySelectorAll(".instance-result")].find(item => item.dataset.resource === button.dataset.resource);
+        if (result) activateInstance(finding.querySelector(`[aria-controls="${result.id}"]`));
+        finding.open = true; finding.querySelector("summary").focus(); finding.scrollIntoView({block: "start"});
+      }
+      return;
+    }
+    if (button.dataset.instance !== undefined) { activateInstance(button); return; }
+    if (button.dataset.outcome) { button.setAttribute("aria-pressed", String(button.getAttribute("aria-pressed") !== "true")); filter(scope); return; }
+    if (button.classList.contains("reset-filters")) { preset(scope, "fail"); filter(scope); return; }
+    if (button.id === "theme") document.documentElement.dataset.theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    if (button.id === "print") window.print();
+    if (button.id === "mode") { presentation = !presentation; show(); }
+    if (button.id === "fullscreen") fullscreen();
+    if (button.id === "previous") move(-1);
+    if (button.id === "next") move(1);
   });
   scopes.forEach(scope => {
     scope.querySelectorAll(".filters input, .filters select").forEach(input => {
       input.addEventListener("input", () => filter(scope));
       input.addEventListener("change", () => filter(scope));
     });
-    scope.querySelector(".reset-filters").addEventListener("click", () => {
-      scope.querySelectorAll(".filters input, .filters select").forEach(input => { input.value = ""; });
-      filter(scope);
-    });
   });
-  document.getElementById("previous").addEventListener("click", () => move(-1));
-  document.getElementById("next").addEventListener("click", () => move(1));
-  document.getElementById("fullscreen").addEventListener("click", fullscreen);
-  document.getElementById("theme").addEventListener("click", () => {
-    document.documentElement.dataset.theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-  });
+  select.addEventListener("change", () => { view = "overview"; show(); });
   document.addEventListener("keydown", event => {
-    if (event.altKey || event.ctrlKey || event.metaKey || event.target.closest("select,input,button,textarea,summary,a,[contenteditable=true]")) return;
-    if (!explorer && (event.key === "ArrowRight" || event.key === " ")) { event.preventDefault(); move(1); }
-    if (!explorer && event.key === "ArrowLeft") { event.preventDefault(); move(-1); }
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    const tab = event.target.closest("[role='tab']");
+    if (tab && ["ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) {
+      event.preventDefault();
+      const siblings = [...tab.closest("[role='tablist']").querySelectorAll("[role='tab']")];
+      let index = siblings.indexOf(tab);
+      index = event.key === "Home" ? 0 : event.key === "End" ? siblings.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + siblings.length) % siblings.length;
+      siblings[index].click(); siblings[index].focus(); return;
+    }
+    if (event.target.closest("select,input,button,textarea,summary,a,[contenteditable=true]")) return;
+    if (presentation && ["ArrowRight", " ", "ArrowLeft"].includes(event.key)) { event.preventDefault(); move(event.key === "ArrowLeft" ? -1 : 1); }
     if (event.key.toLowerCase() === "f") fullscreen();
+  });
+  let printState = [];
+  window.addEventListener("beforeprint", () => {
+    const scope = activeScope();
+    printState = [...scope.querySelectorAll("details, [hidden]")].map(element => [element, element.hasAttribute("hidden"), element.open]);
+    scope.querySelectorAll("[hidden]").forEach(element => { element.hidden = false; });
+    scope.querySelectorAll("details").forEach(element => { element.open = true; });
+  });
+  window.addEventListener("afterprint", () => {
+    printState.forEach(([element, hidden, open]) => {
+      element.hidden = hidden;
+      if (element.tagName === "DETAILS") element.open = open;
+    });
+    printState = [];
+    show();
   });
   show();
 })();

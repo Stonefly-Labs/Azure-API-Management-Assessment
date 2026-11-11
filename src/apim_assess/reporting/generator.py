@@ -1,3 +1,4 @@
+from collections import Counter, defaultdict
 from importlib.resources import files
 from typing import TypedDict
 from urllib.parse import urlsplit
@@ -18,9 +19,122 @@ from apim_assess.analyzer.engine import (
 from apim_assess.analyzer.evaluators.policy import coverage
 from apim_assess.analyzer.policy_resolver import resolve
 from apim_assess.artifacts import digest
-from apim_assess.models.findings import Finding, McsbCoverage, PillarScore, PortfolioAssessment
+from apim_assess.models.findings import (
+    Evidence,
+    Finding,
+    McsbCoverage,
+    PillarScore,
+    PortfolioAssessment,
+    Rule,
+    Severity,
+)
 from apim_assess.models.policy import PolicyCoverage
 from apim_assess.models.snapshot import Instance, Snapshot
+
+OUTCOMES = ("fail", "unknown", "unsupported", "pass", "waived", "not_applicable")
+SEVERITIES = ("Critical", "High", "Medium", "Low", "Advisory")
+POLICY_CONTROLS = {
+    "authentication": "Caller authentication",
+    "jwt": "JWT / Entra",
+    "rate_limit": "Rate / concurrency",
+    "inheritance": "Base inheritance",
+    "cors": "CORS wildcard check",
+    "backend": "Backend entity",
+}
+
+
+class FindingGroup(TypedDict):
+    rule: Rule
+    findings: list[Finding]
+    outcome: str
+    severity: Severity
+
+
+class EvidencePattern(TypedDict):
+    detail: str
+    items: list[Evidence]
+
+
+class PolicySummary(TypedDict):
+    resource_id: str
+    api_path: str
+    operations: int
+    rows: list[PolicyCoverage]
+    counts: dict[str, dict[str, int]]
+
+
+def display_outcome(finding: Finding) -> str:
+    return "waived" if finding.waiver_justification is not None else finding.result.outcome
+
+
+def group_findings(findings: list[Finding]) -> list[FindingGroup]:
+    grouped: dict[str, list[Finding]] = defaultdict(list)
+    for finding in findings:
+        grouped[finding.rule.id].append(finding)
+    result: list[FindingGroup] = []
+    for rows in grouped.values():
+        rows = sorted(
+            rows,
+            key=lambda finding: (
+                OUTCOMES.index(display_outcome(finding)),
+                SEVERITIES.index(finding.severity),
+                finding.resource_id.casefold(),
+            ),
+        )
+        result.append(
+            {
+                "rule": rows[0].rule,
+                "findings": rows,
+                "outcome": display_outcome(rows[0]),
+                "severity": rows[0].severity,
+            }
+        )
+    return sorted(
+        result,
+        key=lambda group: (
+            OUTCOMES.index(group["outcome"]),
+            SEVERITIES.index(group["severity"]),
+            SEVERITIES.index(group["rule"].severity),
+            group["rule"].id,
+        ),
+    )
+
+
+def evidence_patterns(evidence: list[Evidence]) -> list[EvidencePattern]:
+    grouped: dict[str, list[Evidence]] = defaultdict(list)
+    for item in evidence:
+        grouped[item.detail].append(item)
+    return [{"detail": detail, "items": items} for detail, items in grouped.items()]
+
+
+def policy_summary(rows: list[PolicyCoverage]) -> list[PolicySummary]:
+    grouped: dict[tuple[str, str], list[PolicyCoverage]] = defaultdict(list)
+    for row in rows:
+        grouped[row.resource_id, row.api_path].append(row)
+    return [
+        {
+            "resource_id": resource_id,
+            "api_path": api_path,
+            "operations": len({row.operation_path for row in contexts if row.operation_path}),
+            "rows": contexts,
+            "counts": {
+                control: dict(Counter(getattr(row, control) for row in contexts))
+                for control in POLICY_CONTROLS
+            },
+        }
+        for (resource_id, api_path), contexts in sorted(grouped.items())
+    ]
+
+
+def outcome_counts(findings: list[Finding]) -> dict[str, int]:
+    counts = Counter(display_outcome(finding) for finding in findings)
+    return {outcome: counts[outcome] for outcome in OUTCOMES}
+
+
+def confidence(findings: list[Finding]) -> float | None:
+    counts = outcome_counts(findings)
+    applicable = sum(counts[key] for key in ("fail", "pass", "unknown", "unsupported"))
+    return round(100 * (counts["fail"] + counts["pass"]) / applicable, 1) if applicable else None
 
 
 class ReportScope(TypedDict):
@@ -238,4 +352,16 @@ def render(snapshot: Snapshot, assessment: PortfolioAssessment) -> str:
         rule_settings=assessment.rule_settings,
         roadmap=roadmap,
         narrative=assessment.narrative,
+        identities=identities,
+        outcomes=OUTCOMES,
+        severities=SEVERITIES,
+        policy_controls=POLICY_CONTROLS,
+        group_findings=group_findings,
+        evidence_patterns=evidence_patterns,
+        policy_summary=policy_summary,
+        outcome_counts=outcome_counts,
+        confidence=confidence,
+        display_outcome=display_outcome,
+        schema_version=assessment.schema_version,
+        snapshot_digest=assessment.snapshot_digest,
     )

@@ -3,7 +3,16 @@ from html.parser import HTMLParser
 import pytest
 
 from apim_assess.analyzer.engine import analyze
-from apim_assess.reporting.generator import render
+from apim_assess.models.findings import Evidence
+from apim_assess.models.policy import PolicyCoverage
+from apim_assess.reporting.generator import (
+    confidence,
+    evidence_patterns,
+    group_findings,
+    outcome_counts,
+    policy_summary,
+    render,
+)
 
 
 class ReportParser(HTMLParser):
@@ -14,9 +23,18 @@ class ReportParser(HTMLParser):
         self.svg_count = 0
         self.script_sources = []
         self.scope_select = False
+        self.ids = []
+        self.views = []
+        self.rules = []
 
     def handle_starttag(self, tag, attrs):
         attributes = dict(attrs)
+        if "id" in attributes:
+            self.ids.append(attributes["id"])
+        if "data-view" in attributes:
+            self.views.append(attributes["data-view"])
+        if "data-rule" in attributes:
+            self.rules.append(attributes["data-rule"])
         if tag in {"script", "link", "img", "iframe", "object"}:
             if attributes.get("src") or attributes.get("href") or attributes.get("data"):
                 self.external_runtime.append((tag, attrs))
@@ -106,5 +124,96 @@ def test_waiver_html_is_escaped_and_explorer_uses_text_not_markup(snapshot):
     html = render(snapshot, assessment)
     assert '<img src=x onerror="alert(1)">' not in html
     assert "&lt;img" in html
-    assert "finding.textContent.toLowerCase().includes(search)" in html
+    assert "result.textContent.toLowerCase().includes(search)" in html
     assert ".innerHTML" not in html
+
+
+def test_focused_report_groups_each_rule_and_preserves_artifacts(snapshot):
+    assessment = analyze(snapshot)
+    original = assessment.model_dump_json()
+    html = render(snapshot, assessment)
+    parser = ReportParser()
+    parser.feed(html)
+    assert parser.views == ["overview", "findings", "gaps", "roadmap", "mcsb", "policy", "method"]
+    assert len(parser.ids) == len(set(parser.ids))
+    for rule in {finding.rule.id for finding in assessment.findings}:
+        assert parser.rules.count(rule) == len(snapshot.instances) + 1
+    assert 'data-mode="focused"' in html
+    assert assessment.model_dump_json() == original
+    assert render(snapshot, assessment) == html
+
+
+def test_grouping_keeps_mixed_outcomes_and_excludes_waivers_from_confidence(snapshot):
+    base = analyze(snapshot).findings[0]
+    rows = [base.model_copy(deep=True) for _ in range(3)]
+    for row, instance in zip(rows, snapshot.instances, strict=True):
+        row.resource_id = instance.resource_id
+    rows[0].result.outcome = "fail"
+    rows[0].severity = "Critical"
+    rows[1].result.outcome = "unknown"
+    rows[2].result.outcome = "fail"
+    rows[2].waiver_justification = "Accepted for testing"
+    groups = group_findings(rows)
+    assert len(groups) == 1
+    assert groups[0]["outcome"] == "fail"
+    assert [row.result.outcome for row in groups[0]["findings"]] == ["fail", "unknown", "fail"]
+    assert group_findings(list(reversed(rows))) == groups
+    assert outcome_counts(rows) == {
+        "fail": 1,
+        "unknown": 1,
+        "unsupported": 0,
+        "pass": 0,
+        "waived": 1,
+        "not_applicable": 0,
+    }
+    assert confidence(rows) == 50
+    rows[0].result.outcome = "not_applicable"
+    rows[1].result.outcome = "unsupported"
+    assert confidence(rows) == 0
+    rows[1].result.outcome = "not_applicable"
+    assert confidence(rows) is None
+
+
+def test_evidence_patterns_preserve_all_sources_paths_and_escaping(snapshot):
+    assessment = analyze(snapshot)
+    evidence = [
+        Evidence(
+            source=f"source-{index}",
+            detail='<script>alert("pattern")</script>',
+            api_path=f"apis/orders/operations/{index}",
+        )
+        for index in range(405)
+    ]
+    assessment.findings[0].result.evidence = evidence
+    patterns = evidence_patterns(evidence)
+    assert len(patterns) == 1 and patterns[0]["items"] == evidence
+    html = render(snapshot, assessment)
+    assert "405 items" in html
+    assert "source-404" in html and "apis/orders/operations/404" in html
+    assert '<script>alert("pattern")</script>' not in html
+    assert "&lt;script&gt;" in html
+
+
+def test_policy_api_rollups_preserve_distinct_product_and_operation_contexts():
+    base = PolicyCoverage(
+        resource_id="instance",
+        api_path="apis/orders",
+        operation_path="apis/orders/operations/get",
+        product_path=None,
+        subscription_required=True,
+        authentication="present",
+        jwt="present",
+        rate_limit="absent",
+        inheritance="present",
+        cors="not_applicable",
+        backend="unknown",
+    )
+    product = base.model_copy(update={"product_path": "products/public", "jwt": "unknown"})
+    other_operation = base.model_copy(update={"operation_path": "apis/orders/operations/post"})
+    rows = [base, product, other_operation]
+    summary = policy_summary(rows)
+    assert len(summary) == 1
+    assert summary[0]["operations"] == 2
+    assert summary[0]["rows"] == rows
+    assert summary[0]["counts"]["jwt"] == {"present": 2, "unknown": 1}
+    assert summary[0]["counts"]["rate_limit"] == {"absent": 3}
