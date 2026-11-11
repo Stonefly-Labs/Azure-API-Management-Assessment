@@ -344,6 +344,53 @@ def test_missing_maxima_remain_partial_even_with_every_hour_present():
     assert any("BackendDuration / ApiId" in warning.message for warning in warnings)
 
 
+def test_no_status_category_does_not_discard_other_status_splits():
+    timestamp = datetime.now(UTC).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
+
+    def handler(request):
+        if not request.url.path.endswith("/metrics"):
+            return httpx.Response(200, json=service())
+        name = request.url.params["metricnames"]
+        dimension = request.url.params.get("$filter", "").split(" ")[0]
+        if name != "Requests" or dimension != "GatewayResponseCodeCategory":
+            return httpx.Response(200, json={"value": []})
+        return httpx.Response(
+            200,
+            json={
+                "value": [
+                    {
+                        "name": {"value": name},
+                        "unit": "Count",
+                        "timeseries": [
+                            {
+                                "metadatavalues": [
+                                    {"name": {"value": dimension}, "value": category}
+                                ],
+                                "data": [{"timeStamp": timestamp.isoformat(), "total": total}],
+                            }
+                            for category, total in [("4xx", 4), ("5xx", 5), ("None", 2)]
+                        ],
+                    }
+                ]
+            },
+        )
+
+    snapshot = exercise(
+        handler, AssessmentConfig.model_validate({"targets": {"instances": [{"resource_id": ID}]}})
+    )
+    categories = {
+        series.dimensions["GatewayResponseCodeCategory"]: series
+        for series in snapshot.instances[0].metrics
+        if "GatewayResponseCodeCategory" in series.dimensions
+    }
+    assert set(categories) == {"4xx", "5xx", "none"}
+    assert all(series.status == "available" for series in categories.values())
+    assert categories["none"].points[0].total == 2
+    assert not any(
+        warning.code == "INVALID_METRIC_CATEGORY" for warning in snapshot.collection_warnings
+    )
+
+
 def test_permission_failure_is_preserved_without_response_body():
     def handler(request):
         return httpx.Response(403, json={"error": {"message": SECRET}})

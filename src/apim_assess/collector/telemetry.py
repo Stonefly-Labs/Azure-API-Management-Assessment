@@ -81,7 +81,7 @@ def dimensions_for(series: _Series, dimension: Dimension | None) -> dict[Dimensi
             raise AzureReadError("INVALID_METRIC_LOCATION")
     else:
         value = value.casefold()
-        if value not in {"1xx", "2xx", "3xx", "4xx", "5xx", "other", "unknown"}:
+        if value not in {"1xx", "2xx", "3xx", "4xx", "5xx", "other", "unknown", "none"}:
             raise AzureReadError("INVALID_METRIC_CATEGORY")
     return {dimension: value}
 
