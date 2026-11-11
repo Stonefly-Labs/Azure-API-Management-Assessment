@@ -588,3 +588,93 @@ def test_legacy_digest_and_findings_still_render_without_reinterpreting_scores(s
     data["instances"][0]["inventory"] = {}
     with pytest.raises(ValueError, match="requires snapshot schema 1.1"):
         snapshot.model_validate(data)
+
+
+def test_hardcoded_policy_urls_detected_across_elements_and_non_routing_policies(
+    policy_snapshot,
+):
+    put(policy_snapshot, "", JWT + RATE + CORS, "<forward-request/>")
+    # Non-routing policies (cache-lookup, ip-filter, check-header, retry, send-request)
+    # must not mask backend routes or literal URLs.
+    put(
+        policy_snapshot,
+        "apis/orders",
+        inbound=(
+            '<cache-lookup vary-by-developer="false" vary-by-developer-groups="false"/>'
+            '<ip-filter action="allow"/>'
+            '<check-header name="X-Test" failed-check-httpcode="401"/>'
+            '<retry condition="@(true)" count="2" interval="1">'
+            '<set-backend-service backend-id="orders"/>'
+            "</retry>"
+        ),
+    )
+    assert outcomes(policy_snapshot)["APIM-OPS-002"] == "pass"
+
+    # Hardcoded base-url in C# expression after cache-lookup fails APIM-OPS-002 with location
+    put(
+        policy_snapshot,
+        "apis/orders",
+        inbound=(
+            '<cache-lookup vary-by-developer="false" vary-by-developer-groups="false"/>'
+            '<set-backend-service base-url="@(&quot;https://hardcoded.example.test/api&quot;)"/>'
+        ),
+    )
+    assessment = analyze(policy_snapshot)
+    ops2 = next(item for item in assessment.findings if item.rule.id == "APIM-OPS-002")
+    assert ops2.result.outcome == "fail"
+    assert "hardcoded_urls=apis/orders/inbound/set-backend-service@base-url" in (
+        ops2.result.evidence[0].detail
+    )
+    assert "hardcoded.example.test" not in policy_snapshot.model_dump_json()
+
+    # Hardcoded URL inside send-request/set-url fails APIM-OPS-002 even when backend-id is used
+    put(
+        policy_snapshot,
+        "apis/orders",
+        inbound=(
+            '<set-backend-service backend-id="orders"/>'
+            '<send-request mode="new" response-variable-name="auth">'
+            "<set-url>https://auth.example.test/token</set-url>"
+            "</send-request>"
+        ),
+    )
+    doc = policy_snapshot.instances[0].inventory.policies["apis/orders"]
+    assert doc.hardcoded_urls == ["inbound/send-request/set-url:L1"]
+    ops2 = next(
+        item for item in analyze(policy_snapshot).findings if item.rule.id == "APIM-OPS-002"
+    )
+    assert ops2.result.outcome == "fail"
+    assert "hardcoded_urls=apis/orders/inbound/set-url:L1" in ops2.result.evidence[0].detail
+
+    # Named-value token in set-url or relative rewrite-uri does not fail APIM-OPS-002
+    put(
+        policy_snapshot,
+        "apis/orders",
+        inbound=(
+            '<set-backend-service backend-id="orders"/>'
+            '<send-request mode="new" response-variable-name="auth">'
+            "<set-url>{{auth-endpoint}}/token</set-url>"
+            "</send-request>"
+            '<rewrite-uri template="/v2/orders"/>'
+        ),
+    )
+    doc = policy_snapshot.instances[0].inventory.policies["apis/orders"]
+    assert doc.hardcoded_urls == []
+    assert outcomes(policy_snapshot)["APIM-OPS-002"] == "pass"
+
+    # Full URL in rewrite-uri template fails APIM-OPS-002
+    put(
+        policy_snapshot,
+        "apis/orders",
+        inbound=(
+            '<set-backend-service backend-id="orders"/>'
+            '<rewrite-uri template="https://legacy.example.test/v1/orders"/>'
+        ),
+    )
+    ops2 = next(
+        item for item in analyze(policy_snapshot).findings if item.rule.id == "APIM-OPS-002"
+    )
+    assert ops2.result.outcome == "fail"
+    assert "hardcoded_urls=apis/orders/inbound/rewrite-uri@template" in (
+        ops2.result.evidence[0].detail
+    )

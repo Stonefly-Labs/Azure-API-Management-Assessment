@@ -81,7 +81,7 @@ The CLI supports both decoupled pipeline stages and a single-command workflow:
 
 ### 5.2 Adjacent Azure Signal Collectors
 - **Networking (`networking_vnet_nsg`):** Inspects linked VNet subnet, NSG security rules (validating mandatory APIM management/load-balancer ports and checking for overly permissive `0.0.0.0/0` inbound gateway exposure), Private Endpoints, and Public IP DDoS protection state.
-- **Telemetry — Azure Monitor Metrics (`azure_monitor_metrics`):** Queries configurable lookback window (default `14d`) for `Capacity`, `CpuPercentage`, `MemoryPercentage`, `Requests` (by response code category 2xx/4xx/5xx and backend response code), `Duration` (avg/p95), and `NetworkConnectivity`.
+- **Telemetry — Azure Monitor Metrics (`azure_monitor_metrics`):** Queries configurable lookback window (default `30d` in Iteration 8; configurable `1..30d`) for `Capacity` (Classic tiers), `CpuPercent_Gateway` & `MemoryPercent_Gateway` (v2 tiers), `Requests` (overall and split by `GatewayResponseCodeCategory` and `ApiId`), `Duration`, `BackendDuration` (split by `ApiId`), and `NetworkConnectivity`.
 - **Telemetry — Optional Log Analytics KQL Module (`log_analytics_kql`):** When enabled and linked to a Log Analytics Workspace, executes read-only KQL queries against `ApiManagementGatewayLogs` / `AzureDiagnostics` to surface runtime evidence:
   - Actual client TLS 1.0 / 1.1 traffic volume
   - Top 5xx failing APIs / backends and timeout hotspots
@@ -98,7 +98,7 @@ The CLI supports both decoupled pipeline stages and a single-command workflow:
 
 ### 5.4 Default-On Snapshot Sanitization
 - Never persists raw Named Value secret strings, backend authorization headers/passwords, or certificate private payloads.
-- Runs an XML & string sanitizer across all collected policy XML documents to mask inline bearer tokens, API keys, SAS tokens, and connection strings with `<REDACTED_SECRET>` while preserving structural metadata (`has_inline_secret_pattern: true`) so the analyzer can flag hardcoded secrets in policies without leaking them in `snapshot.json`.
+- Runs an XML & string sanitizer across all collected policy XML documents to mask inline bearer tokens, API keys, SAS tokens, and connection strings with `<REDACTED_SECRET>` while preserving structural metadata (`has_inline_secret_pattern: true`, secret-free location breadcrumbs for inline secrets, literal URL indicators across `set-backend-service`, `set-url`, `rewrite-uri`, and C# expressions, and hashed `{{named-value}}` token references) so the analyzer can flag hardcoded secrets, hardcoded URLs, and unbacked secret Named Value usage in policies without leaking sensitive values in `snapshot.json`.
 - Gracefully records RBAC permission gaps per module as structured `collection_warnings` rather than aborting the run.
 
 ---
@@ -136,6 +136,12 @@ Verification gaps, Roadmap, MCSB controls, API policy coverage, and Method &
 scope. The same saved assessment powers every view; presentation navigation
 remains optional. This supersedes the slide-first default, not the evidence,
 coverage, sanitization, offline, or scoring requirements.
+
+Iteration 8 extends the focused HTML readout with self-contained, zero-CDN
+inline SVG 30-day trend charts for gateway utilization (`Capacity` on Classic
+tiers or `CpuPercent_Gateway` + `MemoryPercent_Gateway` on v2 tiers), request
+volume by HTTP status code category, request volume by API, and backend latency
+(`BackendDuration`) by API.
 
 1. **Portfolio Rollup + 1–N APIM Instance Switcher**
    - Top navigation bar lets presenters view the **Portfolio Executive Rollup** across all scanned APIM instances or switch instantaneously to any individual APIM instance.

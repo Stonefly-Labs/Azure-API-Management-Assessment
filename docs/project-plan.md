@@ -164,15 +164,17 @@ The hybrid rule engine ships with **45+ rules** mapped across the 5 WAF Pillars 
 > 3. Open a Pull Request to `main`, and
 > 4. **STOP IMMEDIATELY** and wait for human review, testing, and merge before starting the next Iteration.
 
-Rather than building all collectors, all rules, and the report generator horizontally in isolation, execution follows a **vertical-slice (tracer-bullet) approach** across 6 distinct PR-gated phases:
+Rather than building all collectors, all rules, and the report generator horizontally in isolation, execution follows a **vertical-slice (tracer-bullet) approach** across 8 distinct PR-gated phases:
 
 ```text
-Phase / PR 1 (`feature/iter-1-steel-thread`)     ──► Live Auth + Basic APIM Config & Metrics + 5 Seed Rules + Minimal HTML Deck  [STOP & PR]
-Phase / PR 2 (`feature/iter-2-policy-engine`)    ──► Sub-Resources + Sanitizer + Effective XML Policy Resolver + Core Policy Rules [STOP & PR]
-Phase / PR 3 (`feature/iter-3-waf-mcsb-catalog`) ──► Full 5-Pillar WAF & MCSB Rule Catalog + Deep-Dive Explorer & Policy Matrix  [STOP & PR]
-Phase / PR 4 (`feature/iter-4-adjacent-signals`) ──► VNet/NSG/PE + Log Analytics KQL + Defender/Policy/Autoscale Collectors      [STOP & PR]
-Phase / PR 5 (`feature/iter-5-waf-ai-gateway`)   ──► Optional AFD & AppGW Probes + AI Gateway Rules + LLM Narrative + Dockerfile [STOP & PR]
-Phase / PR 6 (`feature/iter-6-focused-report`)   ──► Focused HTML Readout + Grouped Evidence + Verification Gaps + Accessible Navigation [STOP & PR]
+Phase / PR 1 (`feature/iter-1-steel-thread`)            ──► Live Auth + Basic APIM Config & Metrics + 5 Seed Rules + Minimal HTML Deck        [STOP & PR]
+Phase / PR 2 (`feature/iter-2-policy-engine`)           ──► Sub-Resources + Sanitizer + Effective XML Policy Resolver + Core Policy Rules       [STOP & PR]
+Phase / PR 3 (`feature/iter-3-waf-mcsb-catalog`)        ──► Full 5-Pillar WAF & MCSB Rule Catalog + Deep-Dive Explorer & Policy Matrix        [STOP & PR]
+Phase / PR 4 (`feature/iter-4-adjacent-signals`)        ──► VNet/NSG/PE + Log Analytics KQL + Defender/Policy/Autoscale Collectors            [STOP & PR]
+Phase / PR 5 (`feature/iter-5-waf-ai-gateway`)          ──► Optional AFD & AppGW Probes + AI Gateway Rules + LLM Narrative + Dockerfile       [STOP & PR]
+Phase / PR 6 (`feature/iter-6-focused-report`)          ──► Focused HTML Readout + Grouped Evidence + Verification Gaps + Accessible Navigation [STOP & PR]
+Phase / PR 7 (`feature/iter-7-policy-secrets-and-urls`) ──► Deep Policy URL Scan + Key Vault Named Value Cross-Ref + AST Secret Scanner      [STOP & PR]
+Phase / PR 8 (`feature/iter-8-telemetry-trend-charts`)  ──► 30-Day Dimensional Metric Collector + Inline SVG Trend Charts in HTML Readout     [STOP & PR]
 ```
 
 ### Iteration 1: End-to-End "Steel Thread" MVP (Connect, Read Config/Metrics, Render HTML)
@@ -269,6 +271,54 @@ data must not be copied into source, fixtures, or committed artifacts.
      CSS/JS/SVG inline with no external runtime requests or unsafe HTML insertion.
    - Report-only iteration: no new rules, collectors, AI calls, schema migration,
      release, package publish, or live Azure collection is required.
+
+---
+
+### Iteration 7: Deep Policy URL Scanning, Key Vault Named Value Cross-Reference & Structural Secret Detection
+**Goal:** Deepen policy AST and sub-resource analysis for hardcoded backend/callout URLs (`APIM-OPS-002`), unbacked secret Named Values (`APIM-SEC-012`), and inline policy secrets (`APIM-SEC-015`) while preserving strict secret sanitization and offline artifact compatibility.
+
+1. **Hardcoded URLs in Policy Code (`APIM-OPS-002` Enhancement — `sanitizer.py`, `policy.py`, `policy_checks.py`):**
+   - Add `set-url` to `sanitizer.py` `TAGS` and detect literal `http://` / `https://` URLs both in plain attributes/text and embedded inside `@(...)` / `@{...}` C# policy expressions on `<set-backend-service base-url="...">`, `<send-request>` / `<send-one-way-request>` `<set-url>`, and `<rewrite-uri>`.
+   - Fix `backend_routes()` in `analyzer/evaluators/policy.py` so non-routing `OPAQUE` policies (`cache-lookup`, `ip-filter`, `check-header`, `retry`, `send-request`) do not overwrite a known `LITERAL_URL` route with `DYNAMIC`/`unknown`.
+   - Scan policy and fragment ASTs directly so hardcoded backend and callout URLs in any scope (`global`, `workspace`, `product`, `api`, `operation`, `fragment`) are surfaced with exact scope, section, and policy element evidence.
+2. **Secret Named Values Not Backed by Key Vault (`APIM-SEC-012` Enhancement — `subresources.py`, `sanitizer.py`, `service_checks.py`):**
+   - Record hashed Named Value identifiers and capture `{{named-value}}` token references across collected policies and fragments during sanitization.
+   - Enhance `named_secrets` (`APIM-SEC-012`) to emit focused failure evidence for each `secret: true, keyVault: null` Named Value (including resource path, service vs. workspace scope, and how many policies/APIs reference it) without retrieving secret values.
+3. **Structural + Pattern Secret Scanner in Policy Code (`APIM-SEC-015` Enhancement — `sanitizer.py`, `models/policy.py`, `policy_checks.py`):**
+   - Before scrubbing attributes and text to `<REDACTED_SECRET>`, inspect both regex patterns (`SECRET_PATTERN`) and structural XML context for literal secrets (excluding `{{named-value}}` references):
+     - `<authentication-basic>` with a literal `password` attribute.
+     - `<set-header>` for sensitive headers (`Authorization`, `Ocp-Apim-Subscription-Key`, `x-api-key`, `api-key`, `x-functions-key`, `Proxy-Authorization`) with a literal `<value>`.
+     - `<set-query-parameter>` for sensitive query keys (`key`, `api-key`, `api_key`, `code`, `sig`, `token`, `client_secret`) with a literal `<value>`.
+     - `<validate-jwt>` with inline `<issuer-signing-keys><key>` or `<decryption-keys><key>` literals instead of `certificate-id` or `{{named-value}}`.
+     - Inline Bearer tokens, JWTs (`eyJ...`), SAS tokens (`sig=`), connection strings, and credential assignments inside `<set-variable>`, `<set-body>`, or C# expressions.
+   - Persist secret-free location breadcrumbs on `PolicyDocument` (e.g., `inbound/set-header[name=authorization]: literal secret value`) so `APIM-SEC-015` pinpoints the exact policy, section, and XML element to remediate.
+4. **Acceptance & boundaries:**
+   - Maintain backward compatibility with existing `snapshot.json` schemas (`1.0`–`1.4`).
+   - Add unit tests in `tests/test_sanitizer.py`, `tests/test_policy_resolver.py`, and `tests/test_rule_engine.py` covering new URL/secret AST patterns, `{{named-value}}` false-positive guards, and `OPAQUE` policy route resolution.
+
+---
+
+### Iteration 8: 30-Day Dimensional Telemetry & Interactive SVG Trend Charts
+**Goal:** Collect 30-day dimensional Azure Monitor metrics and render self-contained, zero-CDN inline SVG trend charts in the HTML assessment readout.
+
+1. **30-Day Dimensional Metric Collection (`config.py`, `collector/telemetry.py`, `models/snapshot.py`):**
+   - Update `Telemetry.lookback_days` default from `14` to `30` days.
+   - Extend `collect_metrics()` against `Microsoft.Insights/metrics` to collect 30-day time-series data for:
+     - **Gateway Utilization:** `Capacity` (`Average`, plus `Maximum` on Premium, split by `Location`) for Classic tiers (`Developer`, `Basic`, `Standard`, `Premium`), or `CpuPercent_Gateway` and `MemoryPercent_Gateway` (`Average, Maximum`) for v2 tiers (`BasicV2`, `StandardV2`, `PremiumV2`).
+     - **Request Volume by Status Code:** `Requests` (`Total`) split by `$filter="GatewayResponseCodeCategory eq '*'"` (`2xx`, `3xx`, `4xx`, `5xx`).
+     - **Request Volume by API:** `Requests` (`Total`) split by `$filter="ApiId eq '*'"` (bounded to top APIs).
+     - **Backend Latency by API:** `BackendDuration` (`Average, Maximum` in milliseconds) split by `$filter="ApiId eq '*'"` (supplemented by `log_analytics` per-API latency when KQL is enabled).
+   - Extend `MetricSeries` with optional dimension metadata while preserving compatibility with existing `1.0`–`1.4` snapshots.
+2. **Self-Contained Inline SVG Trend Charts (`reporting/generator.py`, `templates/report_deck.html.j2`):**
+   - Roll up 30-day time-series points in `generator.py` and render a 4-panel **30-Day Telemetry & Trends** visual grid using zero-CDN inline SVG charts:
+     1. **Gateway Capacity (Classic) or CPU & Memory (v2) 30-Day Trend** (with `70%` warning and `85%` saturation reference lines).
+     2. **Request Volume by HTTP Status Code Category (`2xx` / `3xx` / `4xx` / `5xx`)**.
+     3. **Request Volume by Top APIs**.
+     4. **Backend Latency (`BackendDuration` Avg / Max ms) by API** (with the `2,000 ms` threshold reference line).
+   - Support portfolio vs. per-instance scope switching, dark/light themes, accessible labels/tables, and clean print rendering.
+3. **Acceptance & boundaries:**
+   - Verify offline `analyze -> report` and mocked `assess` replay across Classic and v2 instances, partial/unavailable metric states, and legacy snapshots without dimensional series.
+   - Keep all CSS, JS, and SVG inline with zero external runtime requests.
 
 ---
 

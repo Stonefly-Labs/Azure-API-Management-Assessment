@@ -548,6 +548,106 @@ def test_invalid_rule_configuration_is_rejected(data):
         RuleSettings.model_validate(data)
 
 
+def test_secret_named_values_cross_reference_policy_and_fragment_usage(catalog_snapshot):
+    inventory = catalog_snapshot.instances[0].inventory
+    add(catalog_snapshot, "namedValues/plain-secret", "named_value", secret=True, key_vault=False)
+    add(catalog_snapshot, "namedValues/kv-secret", "named_value", secret=True, key_vault=True)
+    put(
+        catalog_snapshot,
+        "apis/orders",
+        inbound=(
+            '<set-header name="x-api-key" exists-action="override">'
+            "<value>{{plain-secret}}</value>"
+            "</set-header>"
+        ),
+    )
+    frag_key = "policyFragments/" + reference_id("shared-auth")
+    inventory.fragments[frag_key] = sanitize_policy(
+        "frag",
+        '<fragment><set-header name="Authorization" exists-action="override">'
+        "<value>Bearer {{plain-secret}}</value></set-header></fragment>",
+        fragment=True,
+    )
+    sec12 = finding(catalog_snapshot, "APIM-SEC-012")
+    assert sec12.result.outcome == "fail"
+    details = {item.source: item.detail for item in sec12.result.evidence}
+    plain_detail = next(
+        detail for source, detail in details.items() if source.endswith("/namedValues/plain-secret")
+    )
+    assert "name=plain-secret; secret=True; key_vault_linked=False;" in plain_detail
+    assert f"referenced_by=apis/orders, {frag_key};" in plain_detail
+
+
+def test_structural_and_regex_secret_scanner_detects_inline_secrets_without_false_positives(
+    catalog_snapshot,
+):
+    secret_pw = "SuperSecretBasicPass123!"
+    secret_key = "my-hardcoded-api-key-value-999"
+    secret_q = "hardcoded-func-code-777"
+    secret_jwt_key = "aGFyZGNvZGVkLXNpZ25pbmcta2V5LWJhc2U2NA=="
+    secret_var = "hardcoded-client-secret-xyz"
+    doc = sanitize_policy(
+        "apis/orders/policies/xml",
+        "<!--\n  Policy comment header\n-->\n<policies>\n  <inbound>\n"
+        f'    <authentication-basic username="svc" password="{secret_pw}"/>\n'
+        '    <set-header name="x-api-key" exists-action="override">\n'
+        f"      <value>{secret_key}</value>\n"
+        "    </set-header>\n"
+        '    <set-query-parameter name="code" exists-action="override">\n'
+        f"      <value>{secret_q}</value>\n"
+        "    </set-query-parameter>\n"
+        '    <validate-jwt header-name="Authorization">\n'
+        f"      <issuer-signing-keys><key>{secret_jwt_key}</key></issuer-signing-keys>\n"
+        "    </validate-jwt>\n"
+        f'    <set-variable name="clientSecret" value="{secret_var}"/>\n'
+        "  </inbound>\n  <backend><base/></backend>\n  <outbound><base/></outbound>\n"
+        "  <on-error><base/></on-error>\n</policies>",
+    )
+    assert doc.has_inline_secret_pattern is True
+    assert doc.inline_secret_locations == [
+        "inbound/authentication-basic@password:L6",
+        "inbound/set-header[name=x-api-key]:L8",
+        "inbound/set-query-parameter[name=code]:L11",
+        "inbound/validate-jwt/issuer-signing-keys/key:L14",
+        "inbound/set-variable[name=clientsecret]:L16",
+    ]
+    dumped = doc.model_dump_json()
+    for val in (secret_pw, secret_key, secret_q, secret_jwt_key, secret_var):
+        assert val not in dumped
+
+    catalog_snapshot.instances[0].inventory.policies["apis/orders"] = doc
+    sec15 = finding(catalog_snapshot, "APIM-SEC-015")
+    assert sec15.result.outcome == "fail"
+    assert any(
+        "locations=inbound/authentication-basic@password:L6, inbound/set-header[name=x-api-key]:L8"
+        in item.detail
+        for item in sec15.result.evidence
+    )
+
+    # Named-value tokens, certificate-id references, and dynamic C# header forwards must not trigger
+    clean_doc = sanitize_policy(
+        "apis/orders/policies/xml",
+        "<policies><inbound>"
+        '<authentication-basic username="{{svc-user}}" password="{{svc-pass}}"/>'
+        '<set-header name="Authorization" exists-action="override">'
+        "<value>Bearer {{backend-token}}</value></set-header>"
+        '<set-header name="x-api-key" exists-action="override">'
+        '<value>@(context.Request.Headers.GetValueOrDefault("x-api-key", ""))</value>'
+        "</set-header>"
+        '<set-header name="Ocp-Apim-Subscription-Key" exists-action="delete"/>'
+        '<set-query-parameter name="api-key" exists-action="override">'
+        "<value>{{partner-key}}</value></set-query-parameter>"
+        '<validate-jwt header-name="Authorization">'
+        '<issuer-signing-keys><key certificate-id="signing-cert"/></issuer-signing-keys>'
+        "</validate-jwt>"
+        '<set-variable name="correlationId" value="@(context.RequestId.ToString())"/>'
+        "</inbound><backend><base/></backend><outbound><base/></outbound>"
+        "<on-error><base/></on-error></policies>",
+    )
+    assert clean_doc.has_inline_secret_pattern is False
+    assert clean_doc.inline_secret_locations == []
+
+
 def test_unknown_and_deferred_overrides_are_not_silently_ignored(catalog_snapshot):
     with pytest.raises(ValueError, match="deferred rule"):
         analyze(catalog_snapshot, RuleSettings(severity_overrides={"APIM-SEC-002": "Low"}))

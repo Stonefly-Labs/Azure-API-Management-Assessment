@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import re
+from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 from xml.etree import ElementTree as ET
 
 from defusedxml.common import DefusedXmlException
-from defusedxml.ElementTree import fromstring
+from defusedxml.ElementTree import DefusedXMLParser
 
 from apim_assess.models.policy import PolicyDocument
 
@@ -64,6 +65,7 @@ TAGS = {
     "set-body",
     "set-variable",
     "set-status",
+    "set-url",
     "send-request",
     "send-one-way-request",
     "retry",
@@ -138,11 +140,265 @@ ENUM_ATTRIBUTES = {
     "token-quota-period": {"Hourly", "Daily", "Weekly", "Monthly", "Yearly"},
 }
 IMPLEMENTATION_HEADERS = {"x-powered-by", "x-aspnet-version", "server"}
-SECRET_PATTERN = re.compile(
-    r"(?i)(bearer\s+\S+|(?:password|api[-_]?key|accountkey|sharedaccesssignature|"
-    r"client[-_]?secret|access[-_]?token)\s*[=:]|[?&]sig=|"
-    r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)"
+SENSITIVE_HEADERS = {
+    "authorization",
+    "proxy-authorization",
+    "ocp-apim-subscription-key",
+    "x-api-key",
+    "api-key",
+    "x-functions-key",
+    "x-goog-api-key",
+    "anthropic-api-key",
+}
+SENSITIVE_QUERY_PARAMS = {
+    "key",
+    "api-key",
+    "api_key",
+    "x-api-key",
+    "code",
+    "sig",
+    "token",
+    "access_token",
+    "client_secret",
+    "password",
+    "secret",
+}
+SENSITIVE_VARIABLE_NAME = re.compile(
+    r"(?:secret|password|passwd|pwd|api[-_]?key|access[-_]?key|connection[-_]?string)",
+    re.IGNORECASE,
 )
+NAMED_VALUE_TOKEN = re.compile(r"\{\{\s*([^{}\s]+?)\s*\}\}")
+LITERAL_URL_PATTERN = re.compile(r"(?i)https?://(?![\s\"')}]*\{\{)[a-z0-9.-]+")
+CONTEXT_LOOKUP_PATTERN = re.compile(
+    r'context\.[A-Za-z0-9_.<>]+\s*(?:\[\s*"[^"]*"\s*\]|\(\s*"[^"]*"(?:\s*,\s*"[^"]*"\s*)?\))'
+)
+QUOTED_STRING_PATTERN = re.compile(r'"([^"\\]*(?:\\.[^"\\]*)*)"')
+SECRET_PATTERN = re.compile(
+    r"(?i)((?<![A-Za-z0-9_-])bearer\s+(?!\{\{)[^\s\"'<>]+|"
+    r"(?<![A-Za-z0-9_-])basic\s+(?!\{\{)(?![A-Za-z0-9_-]+=[\"\'])[A-Za-z0-9+/=]{8,}|"
+    r"(?:password|pwd|api[-_]?key|accountkey|sharedaccesskey|sharedaccesssignature|"
+    r"instrumentationkey|client[-_]?secret|access[-_]?token)\s*[=:]\s*(?!\{\{)[^\s\"'<>]+|"
+    r"[?&](?:sig|api[-_]?key|x-api-key|code|client_secret|access_token)=(?!\{\{)[^&\s\"'<>]+|"
+    r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|"
+    r"\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,})\b)"
+)
+
+
+def has_literal_url(value: str) -> bool:
+    return bool(LITERAL_URL_PATTERN.search(value))
+
+
+def _is_hardcoded_secret_value(raw: str) -> bool:
+    stripped = raw.strip()
+    if not stripped or stripped in {
+        REDACTED,
+        DYNAMIC,
+        REFERENCE,
+        LITERAL_URL,
+        LITERAL_ORIGIN,
+        COGNITIVE_AUDIENCE,
+    }:
+        return False
+    without_nv = NAMED_VALUE_TOKEN.sub("", stripped).strip()
+    if not without_nv or without_nv.casefold() in {
+        "bearer",
+        "basic",
+        "digest",
+        "token",
+        "apikey",
+        "api-key",
+    }:
+        return False
+    if stripped.startswith(("@(", "@{")):
+        if SECRET_PATTERN.search(without_nv):
+            return True
+        cleaned = CONTEXT_LOOKUP_PATTERN.sub("", without_nv)
+        literals = [m.group(1).strip() for m in QUOTED_STRING_PATTERN.finditer(cleaned)]
+        return any(
+            lit
+            and lit.casefold()
+            not in {"bearer", "basic", "digest", "token", "apikey", "api-key", ":"}
+            for lit in literals
+        )
+    return True
+
+
+class _LineTrackingBuilder(ET.TreeBuilder):
+    def __init__(self) -> None:
+        super().__init__()
+        self.expat: Any = None
+        self.lines: dict[int, int] = {}
+
+    def start(self, tag: str, attrs: dict[str, str]) -> ET.Element:
+        elem = super().start(tag, attrs)
+        if self.expat is not None:
+            self.lines[id(elem)] = int(self.expat.CurrentLineNumber)
+        return elem
+
+
+def _parse_xml_with_lines(xml: str) -> tuple[ET.Element, dict[int, int]]:
+    builder = _LineTrackingBuilder()
+    parser: Any = DefusedXMLParser(
+        target=builder,
+        forbid_dtd=True,
+        forbid_entities=True,
+        forbid_external=True,
+    )
+    builder.expat = getattr(parser, "parser", getattr(parser, "_parser", None))
+    parser.feed(xml)
+    root = parser.close()
+    if not isinstance(root, ET.Element):
+        raise ValueError("Invalid XML root")
+    return root, builder.lines
+
+
+def _scan_policy(
+    root: ET.Element, xml: str, lines: dict[int, int], *, fragment: bool
+) -> tuple[list[str], list[str], list[str]]:
+    secret_locations: list[str] = []
+    hardcoded_urls: list[str] = []
+    named_values: set[str] = set()
+
+    def _with_line(loc: str, node: ET.Element) -> str:
+        lineno = lines.get(id(node))
+        return f"{loc}:L{lineno}" if lineno is not None else loc
+
+    def visit(node: ET.Element, section: str, parent_tag: str | None) -> None:
+        current_section = (
+            "fragment" if fragment else node.tag if node.tag in SECTIONS else section or "policies"
+        )
+        for raw_attr in node.attrib.values():
+            for match in NAMED_VALUE_TOKEN.finditer(raw_attr):
+                named_values.add(reference_id(match.group(1).casefold()))
+        if node.text:
+            for match in NAMED_VALUE_TOKEN.finditer(node.text):
+                named_values.add(reference_id(match.group(1).casefold()))
+
+        if node.tag == "set-backend-service" and has_literal_url(node.attrib.get("base-url", "")):
+            hardcoded_urls.append(
+                _with_line(f"{current_section}/set-backend-service@base-url", node)
+            )
+        elif node.tag == "set-url" and has_literal_url((node.text or "").strip()):
+            prefix = (
+                f"{current_section}/{parent_tag}"
+                if parent_tag in {"send-request", "send-one-way-request"}
+                else current_section
+            )
+            hardcoded_urls.append(_with_line(f"{prefix}/set-url", node))
+        elif node.tag == "rewrite-uri" and has_literal_url(node.attrib.get("template", "")):
+            hardcoded_urls.append(_with_line(f"{current_section}/rewrite-uri@template", node))
+
+        handled_value_children = False
+        if node.tag == "authentication-basic" and _is_hardcoded_secret_value(
+            node.attrib.get("password", "")
+        ):
+            secret_locations.append(
+                _with_line(f"{current_section}/authentication-basic@password", node)
+            )
+        elif (
+            node.tag == "set-header"
+            and node.attrib.get("exists-action", "").lower() != "delete"
+            and node.attrib.get("name", "").strip().lower() in SENSITIVE_HEADERS
+        ):
+            hdr = node.attrib.get("name", "").strip().lower()
+            val_child = next(
+                (
+                    child
+                    for child in node
+                    if child.tag == "value" and _is_hardcoded_secret_value(child.text or "")
+                ),
+                None,
+            )
+            if val_child is not None:
+                secret_locations.append(
+                    _with_line(f"{current_section}/set-header[name={hdr}]", val_child)
+                )
+                handled_value_children = True
+        elif (
+            node.tag == "set-query-parameter"
+            and node.attrib.get("exists-action", "").lower() != "delete"
+            and node.attrib.get("name", "").strip().lower() in SENSITIVE_QUERY_PARAMS
+        ):
+            param = node.attrib.get("name", "").strip().lower()
+            val_child = next(
+                (
+                    child
+                    for child in node
+                    if child.tag == "value" and _is_hardcoded_secret_value(child.text or "")
+                ),
+                None,
+            )
+            if val_child is not None:
+                secret_locations.append(
+                    _with_line(f"{current_section}/set-query-parameter[name={param}]", val_child)
+                )
+                handled_value_children = True
+        handled_value_attr = False
+        if (
+            node.tag == "set-variable"
+            and SENSITIVE_VARIABLE_NAME.search(node.attrib.get("name", ""))
+            and _is_hardcoded_secret_value(node.attrib.get("value", ""))
+        ):
+            var_name = node.attrib.get("name", "").strip().lower()
+            secret_locations.append(
+                _with_line(f"{current_section}/set-variable[name={var_name}]", node)
+            )
+            handled_value_attr = True
+        elif (
+            node.tag == "key"
+            and parent_tag in {"issuer-signing-keys", "decryption-keys"}
+            and not node.attrib.get("certificate-id")
+            and _is_hardcoded_secret_value(node.text or "")
+        ):
+            secret_locations.append(
+                _with_line(f"{current_section}/validate-jwt/{parent_tag}/key", node)
+            )
+
+        for key, raw_attr in node.attrib.items():
+            if (node.tag == "authentication-basic" and key == "password") or (
+                handled_value_attr and key == "value"
+            ):
+                continue
+            cleaned_attr = NAMED_VALUE_TOKEN.sub("", raw_attr)
+            if key in {"base-url", "url", "template"} and url_api_key(cleaned_attr) is True:
+                secret_locations.append(_with_line(f"{current_section}/{node.tag}@{key}", node))
+            elif cleaned_attr.strip() and SECRET_PATTERN.search(raw_attr):
+                secret_locations.append(_with_line(f"{current_section}/{node.tag}@{key}", node))
+
+        raw_text = (node.text or "").strip()
+        if raw_text and not (
+            node.tag == "key" and parent_tag in {"issuer-signing-keys", "decryption-keys"}
+        ):
+            cleaned_text = NAMED_VALUE_TOKEN.sub("", raw_text)
+            if node.tag == "set-url" and url_api_key(cleaned_text) is True:
+                secret_locations.append(_with_line(f"{current_section}/set-url", node))
+            elif cleaned_text.strip() and SECRET_PATTERN.search(raw_text):
+                if not (
+                    node.tag == "value" and parent_tag in {"set-header", "set-query-parameter"}
+                ):
+                    loc = (
+                        f"{current_section}/{parent_tag}/value"
+                        if node.tag == "value" and parent_tag
+                        else f"{current_section}/{node.tag}"
+                    )
+                    secret_locations.append(_with_line(loc, node))
+
+        for child in node:
+            if handled_value_children and child.tag == "value":
+                for match in NAMED_VALUE_TOKEN.finditer(child.text or ""):
+                    named_values.add(reference_id(match.group(1).casefold()))
+                continue
+            visit(child, current_section, node.tag)
+
+    visit(root, "fragment" if fragment else "", None)
+    if not secret_locations and (comment_match := SECRET_PATTERN.search(xml)):
+        lineno = xml.count("\n", 0, comment_match.start()) + 1
+        secret_locations.append(f"xml/comment-or-text:L{lineno}")
+    return (
+        list(dict.fromkeys(secret_locations)),
+        list(dict.fromkeys(hardcoded_urls)),
+        sorted(named_values),
+    )
 
 
 def reference_id(value: str) -> str:
@@ -213,7 +469,7 @@ def sanitize_policy(
     if len(xml.encode("utf-8")) > MAX_XML_BYTES:
         return unavailable("XML_TOO_LARGE")
     try:
-        root = fromstring(xml, forbid_dtd=True, forbid_entities=True, forbid_external=True)
+        root, lines = _parse_xml_with_lines(xml)
     except (ET.ParseError, DefusedXmlException, ValueError):
         return unavailable("INVALID_XML")
     if root.tag != ("fragment" if fragment else "policies"):
@@ -223,7 +479,10 @@ def sanitize_policy(
         return unavailable("XML_TOO_COMPLEX")
     if fragment and any(node.tag in {*SECTIONS, "base", "include-fragment"} for node in nodes):
         return unavailable("INVALID_FRAGMENT_STRUCTURE")
-    secret_pattern = bool(SECRET_PATTERN.search(xml))
+    secret_locations, hardcoded_urls, named_value_refs = (
+        ([], [], []) if already_sanitized else _scan_policy(root, xml, lines, fragment=fragment)
+    )
+    secret_pattern = bool(secret_locations)
     header_values: dict[int, str] = {}
     for header in root.iter("check-header"):
         if header.attrib.get("name", "").casefold() == "x-azure-fdid":
@@ -252,6 +511,7 @@ def sanitize_policy(
                 "backend-id",
                 "base-url",
                 "url",
+                "template",
                 "header-name",
                 "query-parameter-name",
                 "token-value",
@@ -298,14 +558,14 @@ def sanitize_policy(
                 safe = raw.lower()
             elif key == "resource" and raw.rstrip("/") == "https://cognitiveservices.azure.com":
                 safe = COGNITIVE_AUDIENCE
+            elif key in {"base-url", "url", "template"} and has_literal_url(raw):
+                safe = LITERAL_URL
             elif raw.startswith(("@(", "@{")):
                 safe = DYNAMIC
             elif "{{" in raw:
                 safe = REFERENCE
             elif key in {"fragment-id", "backend-id", "namespace"}:
                 safe = reference_id(raw)
-            elif key in {"base-url", "url"} and raw.startswith(("http://", "https://")):
-                safe = LITERAL_URL
             else:
                 safe = REDACTED
             attributes[key] = safe
@@ -321,6 +581,17 @@ def sanitize_policy(
             raw_text = node.text.strip()
             if id(node) in header_values:
                 node.text = header_values[id(node)]
+            elif node.tag == "set-url":
+                if already_sanitized and raw_text in {DYNAMIC, REFERENCE, LITERAL_URL, REDACTED}:
+                    node.text = raw_text
+                elif has_literal_url(raw_text):
+                    node.text = LITERAL_URL
+                elif raw_text.startswith(("@(", "@{")):
+                    node.text = DYNAMIC
+                elif "{{" in raw_text:
+                    node.text = REFERENCE
+                else:
+                    node.text = REDACTED
             elif node.tag == "origin":
                 if raw_text == "*":
                     node.text = "*"
@@ -363,4 +634,7 @@ def sanitize_policy(
         status="available",
         xml=safe_xml,
         has_inline_secret_pattern=secret_pattern,
+        inline_secret_locations=secret_locations,
+        hardcoded_urls=hardcoded_urls,
+        named_value_refs=named_value_refs,
     )
