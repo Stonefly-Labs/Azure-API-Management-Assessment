@@ -2,7 +2,16 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+)
+
+ApiType = Literal["http", "soap", "websocket", "graphql", "odata", "grpc", "mcp", "a2a", "unknown"]
 
 CATALOG_METADATA_FIELDS = {
     "subscription_scope",
@@ -46,7 +55,7 @@ class CollectionCoverage(PolicyModel):
 class ResourceMetadata(PolicyModel):
     subscription_required: bool | None = None
     service_url_kind: Literal["literal", "dynamic", "none", "unknown"] = "unknown"
-    api_type: Literal["http", "soap", "websocket", "graphql", "odata", "grpc"] | None = None
+    api_type: ApiType | None = None
     protocols: list[Literal["http", "https", "ws", "wss"]] | None = None
     method: (
         Literal["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT"]
@@ -90,6 +99,22 @@ class ResourceMetadata(PolicyModel):
     breaker_retry_after: bool | None = None
 
 
+class GatewayMetadata(PolicyModel):
+    mode: Literal["rest_backed", "passthrough", "unknown"] = "unknown"
+    transport: Literal["streamable", "sse", "jsonrpc"] | None = None
+    endpoint_count: int | None = Field(default=None, ge=0)
+    runtime_url_kind: Literal["literal", "dynamic", "none", "unknown"] = "unknown"
+    agent_card_url_kind: Literal["literal", "dynamic", "none", "unknown"] = "unknown"
+    agent_card_path_hash: str | None = Field(default=None, pattern=r"^ref_[a-f0-9]{64}$")
+    runtime_path_hash: str | None = Field(default=None, pattern=r"^ref_[a-f0-9]{64}$")
+    agent_id_hash: str | None = Field(default=None, pattern=r"^ref_[a-f0-9]{64}$")
+    backend_reference_hash: str | None = Field(default=None, pattern=r"^ref_[a-f0-9]{64}$")
+    backing_operation_path: str | None = Field(
+        default=None,
+        pattern=r"^(?:workspaces/[^/\\?#%\x00-\x1f]+/)?apis/[^/\\?#%\x00-\x1f]+/operations/[^/\\?#%\x00-\x1f]+$",
+    )
+
+
 class SubResource(PolicyModel):
     resource_id: str
     path: str
@@ -106,9 +131,18 @@ class SubResource(PolicyModel):
         "gateway",
         "workspace",
         "logger",
+        "mcp_tool",
     ]
     workspace: str | None = None
     metadata: ResourceMetadata = Field(default_factory=ResourceMetadata)
+    gateway: GatewayMetadata | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        data: dict[str, object] = handler(self)
+        if self.gateway is None:
+            data.pop("gateway", None)
+        return data
 
 
 class Inventory(PolicyModel):
@@ -117,6 +151,14 @@ class Inventory(PolicyModel):
     policies: dict[str, PolicyDocument] = Field(default_factory=dict)
     fragments: dict[str, PolicyDocument] = Field(default_factory=dict)
     product_apis: dict[str, list[str]] = Field(default_factory=dict)
+    gateway_api_version: Literal["2025-09-01-preview"] | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        data: dict[str, object] = handler(self)
+        if self.gateway_api_version is None:
+            data.pop("gateway_api_version", None)
+        return data
 
 
 class PolicyNode(PolicyModel):
@@ -132,6 +174,7 @@ class PolicyNode(PolicyModel):
 class EffectivePolicy(PolicyModel):
     resource_id: str
     api_path: str
+    api_type: ApiType | None = None
     operation_path: str | None = None
     workspace: str | None = None
     product_path: str | None = None

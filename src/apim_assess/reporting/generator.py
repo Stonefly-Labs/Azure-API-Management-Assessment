@@ -9,6 +9,7 @@ from apim_assess.analyzer.engine import (
     ITERATION_2_IDS,
     ITERATION_4_IDS,
     ITERATION_5_IDS,
+    ITERATION_9_IDS,
     SEED_IDS,
     load_rules,
     mcsb_coverage,
@@ -17,7 +18,7 @@ from apim_assess.analyzer.engine import (
     validate_settings,
 )
 from apim_assess.analyzer.evaluators.policy import coverage
-from apim_assess.analyzer.policy_resolver import resolve
+from apim_assess.analyzer.policy_resolver import gateway_inventory_complete, resolve
 from apim_assess.artifacts import digest
 from apim_assess.models.findings import (
     Evidence,
@@ -28,7 +29,7 @@ from apim_assess.models.findings import (
     Rule,
     Severity,
 )
-from apim_assess.models.policy import PolicyCoverage
+from apim_assess.models.policy import PolicyCoverage, SubResource
 from apim_assess.models.snapshot import Instance, Snapshot
 from apim_assess.reporting.trends import telemetry_charts
 
@@ -62,6 +63,49 @@ class PolicySummary(TypedDict):
     operations: int
     rows: list[PolicyCoverage]
     counts: dict[str, dict[str, int]]
+
+
+class GatewaySummary(TypedDict):
+    instance: Instance
+    status: str
+    resources: list[SubResource]
+    tools: list[SubResource]
+    mcp_count: int
+    a2a_count: int
+
+
+def gateway_summary(instances: list[Instance]) -> list[GatewaySummary]:
+    result: list[GatewaySummary] = []
+    for instance in instances:
+        inventory = instance.inventory
+        apis = (
+            [
+                item
+                for item in inventory.resources
+                if item.kind == "api" and item.metadata.api_type in {"mcp", "a2a"}
+            ]
+            if inventory
+            else []
+        )
+        result.append(
+            {
+                "instance": instance,
+                "status": (
+                    "Not collected"
+                    if inventory is None or inventory.gateway_api_version is None
+                    else "Complete"
+                    if gateway_inventory_complete(inventory)
+                    else "Incomplete"
+                ),
+                "resources": apis,
+                "tools": [item for item in inventory.resources if item.kind == "mcp_tool"]
+                if inventory
+                else [],
+                "mcp_count": sum(item.metadata.api_type == "mcp" for item in apis),
+                "a2a_count": sum(item.metadata.api_type == "a2a" for item in apis),
+            }
+        )
+    return result
 
 
 def display_outcome(finding: Finding) -> str:
@@ -221,9 +265,12 @@ def render(snapshot: Snapshot, assessment: PortfolioAssessment) -> str:
     rules = [
         rule
         for rule in load_rules()
-        if assessment.schema_version == "1.4"
+        if assessment.schema_version == "1.5"
+        or assessment.schema_version == "1.4"
+        and rule.id not in ITERATION_9_IDS
         or (
-            rule.id not in ITERATION_5_IDS
+            rule.id not in ITERATION_9_IDS
+            and rule.id not in ITERATION_5_IDS
             and (assessment.schema_version == "1.3" or rule.id not in ITERATION_4_IDS)
             if assessment.schema_version in {"1.2", "1.3"}
             else rule.id in (SEED_IDS if assessment.schema_version == "1.0" else ITERATION_2_IDS)
@@ -256,7 +303,7 @@ def render(snapshot: Snapshot, assessment: PortfolioAssessment) -> str:
         raise ValueError("Finding environments do not match the snapshot.")
     if assessment.pillar_scores != scores(assessment.findings):
         raise ValueError("Stored pillar scores do not agree with the findings.")
-    if assessment.schema_version in {"1.2", "1.3", "1.4"}:
+    if assessment.schema_version in {"1.2", "1.3", "1.4", "1.5"}:
         validate_settings(assessment.rule_settings, snapshot)
         if assessment.mcsb_coverage != mcsb_coverage(assessment.findings) or (
             assessment.mcsb_assessed_score != mcsb_score(assessment.mcsb_coverage)
@@ -346,12 +393,14 @@ def render(snapshot: Snapshot, assessment: PortfolioAssessment) -> str:
     template = files("apim_assess").joinpath("reporting", "templates", "report_deck.html.j2")
     return environment.from_string(template.read_text(encoding="utf-8")).render(
         snapshot=snapshot,
+        rule_ids={finding.rule.id for finding in assessment.findings},
         scopes=scopes,
         metric_summary=metric_summary,
+        gateway_summary=gateway_summary,
         telemetry_charts=telemetry_charts,
         telemetry_days=(snapshot.telemetry_end - snapshot.telemetry_start).total_seconds() / 86400,
         legacy=assessment.schema_version == "1.0",
-        iteration={"1.0": "1", "1.1": "2", "1.2": "3", "1.3": "4", "1.4": "5"}[
+        iteration={"1.0": "1", "1.1": "2", "1.2": "3", "1.3": "4", "1.4": "5", "1.5": "9"}[
             assessment.schema_version
         ],
         finding_apis=finding_apis,

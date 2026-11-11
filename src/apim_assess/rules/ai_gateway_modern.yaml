@@ -71,3 +71,19 @@
     - https://learn.microsoft.com/en-us/azure/api-management/validate-graphql-request-policy
     - https://learn.microsoft.com/en-us/azure/api-management/api-management-policy-reference
     - https://learn.microsoft.com/en-us/azure/api-management/mitigate-owasp-api-threats
+- id: APIM-AIGW-006
+  title: MCP server lacks effective incoming OAuth token validation
+  pillar: SEC
+  severity: High
+  non_prod_severity: Medium
+  evaluator: mcp_oauth
+  applicability: Explicit native MCP APIs on supported Classic/v2 managed gateways. Consumption and workspace execution are unsupported. Historical or unavailable native inventory remains unknown.
+  required_signals: [native MCP inventory and tool coverage, effective global and server inbound policies, sanitized validator configuration]
+  description: Require effective validate-jwt or validate-azure-ad-token with configured incoming-token extraction, issuer or tenant trust and audience/client restrictions. Resolve inheritance, fragments and branches. A policy tag, backing REST validator or developer-portal OAuth setting alone cannot pass.
+  business_impact: MCP tools can expose privileged operations and data to agent clients without verified caller token authentication.
+  remediation: MCP should be secured using OAuth 2.0. Configure incoming validate-jwt or validate-azure-ad-token with provider-appropriate issuer/tenant, signature/expiry and audience/client restrictions; follow the current MCP OAuth 2.1 flow where applicable. Subscription keys and backend managed identity are additional controls, not substitutes for this assessment baseline. Verify discovery, consent, PKCE and runtime behavior separately.
+  references:
+    - https://learn.microsoft.com/en-us/azure/api-management/secure-mcp-servers
+    - https://learn.microsoft.com/en-us/azure/api-management/validate-jwt-policy
+    - https://learn.microsoft.com/en-us/azure/api-management/validate-azure-ad-token-policy
+    - https://learn.microsoft.com/en-us/azure/api-management/manage-mcp-servers-rest-api

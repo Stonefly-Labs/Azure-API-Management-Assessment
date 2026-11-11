@@ -17,6 +17,23 @@ def _contexts(ctx: Context, check: str) -> Evaluation:
     observations: list[tuple[Outcome, Evidence]] = []
     methods = {item.path: item.metadata.method for item in ctx.resources("operation")}
     for view in ctx.views:
+        if view.api_type in {"mcp", "a2a"} and check in {
+            "payload_limits",
+            "response_cache",
+            "retry_timeout",
+        }:
+            observations.append(
+                (
+                    "unsupported",
+                    Evidence(
+                        source="effective_policy",
+                        api_path=view.api_path,
+                        detail=f"{view.api_path}; {check}: REST body/cache/forwarding "
+                        "semantics are not established for MCP/A2A.",
+                    ),
+                )
+            )
+            continue
         state: ControlState
         if check == "error_handling":
             state = guaranteed(

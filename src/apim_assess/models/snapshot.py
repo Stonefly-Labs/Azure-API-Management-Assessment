@@ -173,7 +173,7 @@ class Instance(Model):
 
 
 class Snapshot(Model):
-    schema_version: Literal["1.0", "1.1", "1.2", "1.3", "1.4"] = "1.4"
+    schema_version: Literal["1.0", "1.1", "1.2", "1.3", "1.4", "1.5"] = "1.5"
     collected_at: AwareDatetime
     telemetry_start: AwareDatetime
     telemetry_end: AwareDatetime
@@ -188,7 +188,21 @@ class Snapshot(Model):
         if len(set(ids)) != len(ids):
             raise ValueError("Duplicate APIM resource IDs")
         for instance in self.instances:
-            if self.schema_version != "1.4" and (
+            if (
+                self.schema_version != "1.5"
+                and instance.inventory is not None
+                and (
+                    instance.inventory.gateway_api_version is not None
+                    or any(
+                        item.gateway is not None
+                        or item.kind == "mcp_tool"
+                        or item.metadata.api_type in {"mcp", "a2a", "unknown"}
+                        for item in instance.inventory.resources
+                    )
+                )
+            ):
+                raise ValueError("MCP/A2A inventory requires snapshot schema 1.5")
+            if self.schema_version not in {"1.4", "1.5"} and (
                 instance.upstream is not None
                 or instance.inventory is not None
                 and any(
@@ -200,7 +214,7 @@ class Snapshot(Model):
                 raise ValueError(
                     "Upstream and modern workload metadata require snapshot schema 1.4"
                 )
-            if self.schema_version not in {"1.3", "1.4"} and any(
+            if self.schema_version not in {"1.3", "1.4", "1.5"} and any(
                 value is not None
                 for value in (instance.networking, instance.governance, instance.log_analytics)
             ):

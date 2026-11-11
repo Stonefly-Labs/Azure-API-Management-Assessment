@@ -130,7 +130,7 @@ class Narrative(Model):
 
 
 class PortfolioAssessment(Model):
-    schema_version: Literal["1.0", "1.1", "1.2", "1.3", "1.4"] = "1.4"
+    schema_version: Literal["1.0", "1.1", "1.2", "1.3", "1.4", "1.5"] = "1.5"
     snapshot_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
     findings: list[Finding]
     pillar_scores: list[PillarScore]
@@ -142,7 +142,7 @@ class PortfolioAssessment(Model):
 
     @model_validator(mode="after")
     def consistent_version(self) -> "PortfolioAssessment":
-        if self.schema_version != "1.4" and self.narrative is not None:
+        if self.schema_version not in {"1.4", "1.5"} and self.narrative is not None:
             raise ValueError("Narrative enrichment requires findings schema 1.4")
         if self.schema_version == "1.0" and self.policy_coverage:
             raise ValueError("Policy coverage requires findings schema 1.1")

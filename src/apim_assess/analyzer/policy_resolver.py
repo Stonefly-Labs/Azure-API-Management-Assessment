@@ -94,6 +94,7 @@ def resolve(instance: Instance, *, include_graphql: bool = False) -> list[Effect
     }
     result: list[EffectivePolicy] = []
     for api in apis:
+        modern = api.metadata.api_type in {"mcp", "a2a"}
         products = sorted(
             product
             for product, members in inventory.product_apis.items()
@@ -107,6 +108,8 @@ def resolve(instance: Instance, *, include_graphql: bool = False) -> list[Effect
             for item in operations
             if item.path.casefold().startswith(api.path.casefold() + "/operations/")
         ]
+        if modern:
+            targets = [api.path]
         if not targets:
             targets = [api.path]
         open_products = [
@@ -137,6 +140,7 @@ def resolve(instance: Instance, *, include_graphql: bool = False) -> list[Effect
                 view = EffectivePolicy(
                     resource_id=instance.resource_id,
                     api_path=api.path,
+                    api_type=api.metadata.api_type,
                     operation_path=target if target != api.path else None,
                     workspace=api.workspace,
                     product_path=product,
@@ -161,6 +165,10 @@ def resolve(instance: Instance, *, include_graphql: bool = False) -> list[Effect
                     scopes.append(target)
                 for scope in scopes:
                     document = inventory.policies.get(scope)
+                    if modern and scope == product:
+                        view.sections = {section: [_unknown(scope)] for section in SECTIONS}
+                        view.issues.append("Modern product policy execution is not verified")
+                        continue
                     if document is not None and document.status == "absent":
                         continue
                     root = _parse(document) if document else None
@@ -214,7 +222,9 @@ def resolve(instance: Instance, *, include_graphql: bool = False) -> list[Effect
                                     )
                                 )
                         view.sections[section] = merged
-                supported = {"http", "soap"} | ({"graphql"} if include_graphql else set())
+                supported = {"http", "soap", "mcp", "a2a"} | (
+                    {"graphql"} if include_graphql else set()
+                )
                 if api.metadata.api_type not in supported and not view.http_gateway_only:
                     view.issues.append(
                         "Protocol metadata unavailable"
@@ -222,12 +232,21 @@ def resolve(instance: Instance, *, include_graphql: bool = False) -> list[Effect
                         else "Protocol outside HTTP policy coverage"
                     )
                     view.sections = {section: [_unknown(api.path)] for section in SECTIONS}
+                if modern and api.workspace:
+                    view.issues.append("Protocol MCP/A2A workspace execution is unsupported")
+                    view.sections = {section: [_unknown(api.path)] for section in SECTIONS}
                 if len(open_products) > 1:
                     view.issues.append("Multiple open product contexts; selection is unresolved")
                     view.sections = {section: [_unknown(api.path)] for section in SECTIONS}
-                operation_coverage = inventory.collections.get(api.path + "/operations")
+                operation_coverage = inventory.collections.get(
+                    api.path + ("/tools" if api.metadata.api_type == "mcp" else "/operations")
+                )
                 if operation_coverage is None or operation_coverage.status != "complete":
-                    view.issues.append("Operation inventory incomplete")
+                    view.issues.append(
+                        "Tool inventory incomplete"
+                        if api.metadata.api_type == "mcp"
+                        else "Operation inventory incomplete"
+                    )
                     view.sections = {section: [_unknown(api.path)] for section in SECTIONS}
                 if any(
                     node.tag == "unresolved-policy"
@@ -253,7 +272,9 @@ def inventory_complete(inventory: Inventory | None) -> bool:
     required = {"apis", "products", "workspaces"}
     for item in inventory.resources:
         if item.kind == "api":
-            required.add(item.path + "/operations")
+            required.add(
+                item.path + ("/tools" if item.metadata.api_type == "mcp" else "/operations")
+            )
         elif item.kind == "product":
             required.add(item.path + "/apis")
         elif item.kind == "workspace":
@@ -261,4 +282,17 @@ def inventory_complete(inventory: Inventory | None) -> bool:
     return all(
         key in inventory.collections and inventory.collections[key].status == "complete"
         for key in required
+    )
+
+
+def gateway_inventory_complete(inventory: Inventory | None) -> bool:
+    if inventory is None or inventory.gateway_api_version is None:
+        return False
+    keys = {"gateway_apis", "workspaces"}
+    keys.update(
+        item.path + "/gateway_apis" for item in inventory.resources if item.kind == "workspace"
+    )
+    return all(
+        key in inventory.collections and inventory.collections[key].status == "complete"
+        for key in keys
     )

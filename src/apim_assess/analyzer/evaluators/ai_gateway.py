@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from apim_assess.analyzer.evaluators.checks import Check, Context, combine
 from apim_assess.analyzer.evaluators.policy import backend_routes, guaranteed
-from apim_assess.analyzer.policy_resolver import inventory_complete, resolve, walk
+from apim_assess.analyzer.policy_resolver import (
+    gateway_inventory_complete,
+    inventory_complete,
+    resolve,
+    walk,
+)
 from apim_assess.collector.sanitizer import (
     COGNITIVE_AUDIENCE,
     DYNAMIC,
@@ -175,6 +180,18 @@ def _ai(ctx: Context, check: str) -> Evaluation:
     observations: list[tuple[Outcome, Evidence]] = []
     backends_complete = ctx.complete("backends")
     for view in ctx.views:
+        if view.api_type in {"mcp", "a2a"}:
+            observations.append(
+                (
+                    "not_applicable",
+                    Evidence(
+                        source="effective_policy",
+                        detail=f"{view.api_path}; MCP/A2A does not itself establish an LLM route.",
+                        api_path=view.api_path,
+                    ),
+                )
+            )
+            continue
         kinds, selected = _selected(ctx, view)
         outcome: Outcome
         if kinds == {"other"}:
@@ -346,10 +363,119 @@ def graphql(ctx: Context) -> Evaluation:
     )
 
 
+def mcp_oauth(ctx: Context) -> Evaluation:
+    apis = {item.path: item for item in ctx.resources("api") if item.metadata.api_type == "mcp"}
+    inventory = ctx.instance.inventory
+    memberships = [
+        inventory.collections.get(product.path + "/apis")
+        for product in ctx.resources("product")
+        if inventory is not None
+    ]
+    complete = (
+        gateway_inventory_complete(inventory)
+        and ctx.complete("products")
+        and all(item is not None and item.status == "complete" for item in memberships)
+    )
+    observations: list[tuple[Outcome, Evidence]] = []
+    for view in ctx.views:
+        api = apis.get(view.api_path)
+        if api is None:
+            continue
+        outcome: Outcome
+        state: ControlState = "unknown"
+        if api.workspace or ctx.instance.sku and ctx.instance.sku.name == "Consumption":
+            outcome = "unsupported"
+        elif ctx.instance.sku is None:
+            outcome = "unknown"
+        elif ctx.instance.sku.name not in CLASSIC | V2:
+            outcome = "unsupported"
+        elif not complete:
+            outcome = "unknown"
+        else:
+            has_validator = any(
+                node.tag in {"validate-jwt", "validate-azure-ad-token"}
+                for node in walk(view.sections["inbound"])
+            )
+
+            def validate(node: PolicyNode, *, has_validator: bool = has_validator) -> bool | None:
+                if node.tag in {"validate-jwt", "validate-azure-ad-token"}:
+                    return (
+                        True
+                        if node.attributes.get("oauth-validator-configured") == "true"
+                        else None
+                    )
+                if has_validator and node.tag in {
+                    "set-header",
+                    "set-query-parameter",
+                    "authentication-basic",
+                    "authentication-managed-identity",
+                    "set-variable",
+                }:
+                    return None
+                return False
+
+            state = guaranteed(view.sections["inbound"], validate)
+            outcome = "pass" if state == "present" else "fail" if state == "absent" else "unknown"
+        sources = sorted({node.source for node in walk(view.sections["inbound"])})
+        validators = sorted(
+            {
+                node.tag
+                for node in walk(view.sections["inbound"])
+                if node.tag in {"validate-jwt", "validate-azure-ad-token"}
+            }
+        )
+        tools = [
+            tool.path
+            for tool in ctx.resources("mcp_tool")
+            if tool.path.startswith(api.path + "/tools/")
+        ]
+        observations.append(
+            (
+                outcome,
+                Evidence(
+                    source="effective_policy",
+                    api_path=api.path,
+                    detail=f"{api.path}; context={view.product_path or 'non-product'}; "
+                    f"MCP incoming OAuth={state}; validators={','.join(validators) or 'none'}; "
+                    f"tools={','.join(tools) or 'none observed'}; "
+                    f"sources={','.join(sources) or 'no local policy'}; "
+                    f"issues={'; '.join(view.issues) or 'none'}",
+                ),
+            )
+        )
+    evaluation = combine(
+        observations,
+        complete=complete,
+        summary=(
+            "MCP should be secured using OAuth 2.0. No effective validate-jwt or "
+            "validate-azure-ad-token policy was found for an assessed MCP endpoint."
+        ),
+    )
+    if evaluation.outcome == "pass":
+        evaluation.summary = (
+            "All collected MCP entry-point contexts have configured incoming OAuth token "
+            "validation. This does not certify OAuth discovery, PKCE or runtime enforcement."
+        )
+    elif evaluation.outcome == "unknown":
+        evaluation.summary = (
+            "MCP OAuth protection could not be verified. Collect complete native inventory "
+            "and effective policies, and verify issuer/tenant, signature/expiry and "
+            "audience/client restrictions. Unavailable evidence is not confirmed absence."
+        )
+    elif evaluation.outcome == "not_applicable":
+        evaluation.summary = "Complete native inventory contains no MCP servers."
+    elif evaluation.outcome == "unsupported":
+        evaluation.summary = (
+            "MCP OAuth assessment is unsupported for the collected gateway scope/SKU."
+        )
+    return evaluation
+
+
 AI_CHECKS: dict[str, Check] = {
     "ai_token_limit": lambda ctx: _ai(ctx, "token"),
     "ai_managed_identity": lambda ctx: _ai(ctx, "identity"),
     "ai_resilient_pool": lambda ctx: _ai(ctx, "pool"),
     "ai_token_metrics": lambda ctx: _ai(ctx, "metric"),
     "graphql_validation": graphql,
+    "mcp_oauth": mcp_oauth,
 }

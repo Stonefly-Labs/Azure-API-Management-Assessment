@@ -23,7 +23,7 @@ All assessment rules and recommendations are grounded in authoritative Microsoft
 3. **Modern APIM & AI Gateway Workloads**
    - **v2 Tiers (`Basic v2`, `Standard v2`, `Premium v2`):** VNet integration vs. injection semantics, feature parity checks, and scaling characteristics.
    - **AI Gateway / GenAI Patterns (`AIGW`):** Detection of Azure OpenAI / LLM backends and validation of `azure-openai-token-limit` / `llm-token-limit`, `azure-openai-emit-token-metric`, semantic caching, Managed Identity backend auth, and load-balanced backend pools with circuit breakers for 429 resiliency.
-   - **MCP & Agent-to-Agent (`A2A`) APIs (planned Iteration 9):** First-class inventory of native MCP servers, tools and backing API-operation bindings, passthrough transports, and A2A agent APIs with sanitized agent-card/runtime metadata. Inspect effective policies at the documented protocol-specific scopes, not just ordinary REST API policies. MCP endpoints must have effective incoming OAuth token validation using `validate-jwt` or `validate-azure-ad-token`; missing validation produces an actionable security finding recommending OAuth 2.0. This is the assessment's required baseline, not a claim that Microsoft disallows subscription-key authentication.
+   - **MCP & Agent-to-Agent (`A2A`) APIs (Iteration 9):** First-class inventory of native MCP servers, tools and backing API-operation bindings, passthrough transports, and A2A agent APIs with sanitized agent-card/runtime metadata. Inspect effective policies at the documented protocol-specific scopes, not just ordinary REST API policies. MCP endpoints must have effective incoming OAuth token validation using `validate-jwt` or `validate-azure-ad-token`; missing validation produces an actionable security finding recommending OAuth 2.0. This is the assessment's required baseline, not a claim that Microsoft disallows subscription-key authentication.
    - **Workspaces & Self-Hosted Gateways (`SHGW`):** Team isolation boundaries, gateway heartbeat/version currency, and config sync status.
    - **GraphQL, WebSocket & gRPC APIs:** Protocol-specific security (`validate-graphql-request`, max depth/size, WSS enforcement).
 
@@ -102,12 +102,13 @@ The CLI supports both decoupled pipeline stages and a single-command workflow:
 - Runs an XML & string sanitizer across all collected policy XML documents to mask inline bearer tokens, API keys, SAS tokens, and connection strings with `<REDACTED_SECRET>` while preserving structural metadata (`has_inline_secret_pattern: true`, secret-free location breadcrumbs for inline secrets, literal URL indicators across `set-backend-service`, `set-url`, `rewrite-uri`, and C# expressions, and hashed `{{named-value}}` token references) so the analyzer can flag hardcoded secrets, hardcoded URLs, and unbacked secret Named Value usage in policies without leaking sensitive values in `snapshot.json`.
 - Gracefully records RBAC permission gaps per module as structured `collection_warnings` rather than aborting the run.
 
-### 5.5 Planned Iteration 9: MCP & A2A Collection
+### 5.5 Iteration 9: MCP & A2A Collection
 - Use explicitly pinned, documented management API contracts that expose native MCP and A2A resources. MCP management requires `2025-09-01-preview` or a verified later version; an older API returning no MCP entries does not establish that none exist.
 - Collect MCP server/tool inventory, safe transport metadata and backing-operation references, plus A2A agent API metadata and their configured XML policies. Track inventory and policy coverage independently, including unsupported SKU/gateway/workspace combinations.
 - Treat MCP entry-point policies and any backing REST API/operation policies as distinct execution boundaries. Reuse the effective-policy resolver only where its scope/inheritance rules match the documented protocol behavior.
 - Do not invoke MCP tools, execute A2A tasks, fetch arbitrary agent-card URLs, retrieve secret values, or retain unredacted backend URLs, tool schemas/descriptions, agent-card payloads or credentials merely to establish inventory.
 - Preserve offline analysis/reporting and compatibility with historical artifacts; snapshots without these signals must show MCP/A2A coverage as not collected, not zero servers or a security pass.
+- The implemented contract uses `2025-09-01-preview`, with A2A metadata grounded in Microsoft's APIOps ARM example. Schema `1.5` adds only protocol metadata and coverage. Workspace execution is unsupported and product execution remains unresolved; REST-only body/cache/forwarding checks do not claim protocol support.
 
 ---
 
@@ -151,7 +152,7 @@ tiers or `CpuPercent_Gateway` + `MemoryPercent_Gateway` on v2 tiers), request
 volume by HTTP status code category, request volume by API, and backend latency
 (`BackendDuration`) by API.
 
-Iteration 9 is planned to surface MCP/A2A capability inventories and policy
+Iteration 9 surfaces MCP/A2A capability inventories and policy
 coverage in the existing focused readout. MCP OAuth findings must identify the
 affected server/context, the effective token-validation evidence or confirmed
 gap, and remediation. A subscription key, backend managed identity, forwarded

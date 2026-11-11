@@ -10,7 +10,14 @@ from pydantic import ValidationError
 from typer.testing import CliRunner
 
 from apim_assess.analyzer.ai_narrator import NarrativeError, enrich, public_summary
-from apim_assess.analyzer.engine import ITERATION_5_IDS, analyze, mcsb_coverage, mcsb_score, scores
+from apim_assess.analyzer.engine import (
+    ITERATION_5_IDS,
+    ITERATION_9_IDS,
+    analyze,
+    mcsb_coverage,
+    mcsb_score,
+    scores,
+)
 from apim_assess.artifacts import digest
 from apim_assess.cli import app
 from apim_assess.collector.apim_core import collect
@@ -875,7 +882,9 @@ def test_schema_13_digest_and_historical_findings_remain_reportable(modern):
     assessment = analyze(modern)
     assessment.schema_version = "1.3"
     assessment.findings = [
-        item for item in assessment.findings if item.rule.id not in ITERATION_5_IDS
+        item
+        for item in assessment.findings
+        if item.rule.id not in ITERATION_5_IDS | ITERATION_9_IDS
     ]
     assessment.pillar_scores = scores(assessment.findings)
     assessment.mcsb_coverage = mcsb_coverage(assessment.findings)
@@ -1236,7 +1245,7 @@ def test_mocked_multi_instance_modern_assess_and_offline_replay(modern, tmp_path
     assert result.exit_code == 0, result.output
     saved = Snapshot.model_validate_json((directory / "snapshot.json").read_text())
     assessment = PortfolioAssessment.model_validate_json((directory / "findings.json").read_text())
-    assert len(saved.instances) == 2 and len(assessment.findings) == 108
+    assert len(saved.instances) == 2 and len(assessment.findings) == 110
     assert SECRET not in saved.model_dump_json()
     for identifier in ("APIM-AIGW-001", "APIM-AIGW-002", "APIM-AIGW-004", "APIM-SEC-004"):
         assert all(

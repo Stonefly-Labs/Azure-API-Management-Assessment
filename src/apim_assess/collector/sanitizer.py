@@ -460,6 +460,74 @@ def url_api_key(value: object) -> bool | None:
     return False if value_kind(value) == "literal" and parsed.hostname else None
 
 
+def _oauth_configured(node: ET.Element) -> bool:
+    def literal(value: str | None) -> bool:
+        value = (value or "").strip()
+        return bool(
+            value
+            and value not in {"*", REDACTED, DYNAMIC, REFERENCE}
+            and "{{" not in value
+            and not value.startswith(("@(", "@{"))
+        )
+
+    def restricted(container: str, child: str) -> bool:
+        items = node.findall(f"{container}/{child}")
+        return bool(items) and all(literal(item.text) for item in items)
+
+    source = node.get(
+        "header-name", "Authorization" if node.tag == "validate-azure-ad-token" else ""
+    )
+    source = node.get("query-parameter-name", source)
+    if not literal(source) or node.get("token-value") is not None:
+        return False
+    status = node.get("failed-validation-httpcode", "401")
+    if not status.isdigit() or not 400 <= int(status) <= 599:
+        return False
+    if node.tag == "validate-azure-ad-token":
+        endpoint = node.get("authentication-endpoint")
+        if endpoint is not None and endpoint.strip().casefold().removeprefix("https://").rstrip(
+            "/"
+        ) not in {"login.microsoftonline.com", "login.microsoftonline.us"}:
+            return False
+        return literal(node.get("tenant-id")) and any(
+            restricted(container, child)
+            for container, child in (
+                ("audiences", "audience"),
+                ("client-application-ids", "application-id"),
+                ("backend-application-ids", "application-id"),
+            )
+        )
+    if any(
+        node.get(attribute, "true").casefold() != "true"
+        for attribute in ("require-signed-tokens", "require-expiration-time")
+    ):
+        return False
+    discovery = False
+    for config in node.findall("openid-config"):
+        url = config.get("url", "")
+        try:
+            parsed = urlsplit(url)
+            discovery = discovery or bool(
+                literal(url)
+                and parsed.scheme == "https"
+                and parsed.hostname
+                and not parsed.username
+                and not parsed.password
+            )
+        except ValueError:
+            continue
+    keys = any(
+        literal(key.text)
+        or literal(key.get("certificate-id"))
+        or literal(key.get("n"))
+        and literal(key.get("e"))
+        for key in node.findall("issuer-signing-keys/key")
+    )
+    return restricted("audiences", "audience") and (
+        discovery or keys and restricted("issuers", "issuer")
+    )
+
+
 def sanitize_policy(
     source: str, xml: str, *, fragment: bool = False, already_sanitized: bool = False
 ) -> PolicyDocument:
@@ -501,6 +569,16 @@ def sanitize_policy(
         if node.tag not in TAGS:
             node.tag = "unrecognized-policy"
         attributes: dict[str, str] = {}
+        oauth = node.tag in {"validate-jwt", "validate-azure-ad-token"}
+        configured = (
+            (
+                node.get("oauth-validator-configured")
+                if already_sanitized
+                else str(_oauth_configured(node)).lower()
+            )
+            if oauth
+            else None
+        )
         for key, raw in node.attrib.items():
             if key not in {
                 *BOOL_ATTRIBUTES,
@@ -576,6 +654,8 @@ def sanitize_policy(
                     "unknown" if key_presence is None else str(key_presence).lower()
                 )
         node.attrib.clear()
+        if configured in {"true", "false"}:
+            attributes["oauth-validator-configured"] = configured
         node.attrib.update(attributes)
         if node.text and node.text.strip():
             raw_text = node.text.strip()
