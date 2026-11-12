@@ -198,7 +198,7 @@ compliance or overall health score is claimed.
 | APIM-SEC-017 | API or open-product contexts without subscription requirements need a configured unconditional JWT, Entra-token or client-certificate validator. Portal OAuth settings and gateway-to-backend authentication do not validate callers. |
 | APIM-SEC-018 | Subscription-required contexts need JWT/Entra caller validation; a configured certificate validator is an alternative, not a keys-only failure. |
 | APIM-COST-004 | Positive fixed rate limits or concurrency limits enclosing forwarding satisfy the configuration check. Subscription limits require a key and a product/API/operation scope. Consumption does not support rate-limit-by-key. Dynamic limits and conditional increments are unknown. |
-| APIM-SEC-020 | Review wildcard origins with credentials or configured caller protection, using the first effective CORS policy. This is not a browser exploit claim. Missing CORS is not applicable; dynamic origins and explicit OPTIONS operations are unknown. |
+| APIM-SEC-020 | Any confirmed wildcard origin in the first effective CORS policy on an assessed path fails, regardless of authentication, subscription requirements or credentials. Explicit origin allowlists satisfy this assessment baseline; it is not a browser exploit claim. Missing CORS is not applicable; unresolved origins and explicit OPTIONS operations are unknown. Historical findings retain their saved interpretation. |
 | APIM-OPS-002 | Evaluate ordered routing overrides: a literal effective URL fails; a collected backend-entity reference passes. Named-value/expression routes and unresolved references are unknown. |
 
 ### Iteration 3 decisions

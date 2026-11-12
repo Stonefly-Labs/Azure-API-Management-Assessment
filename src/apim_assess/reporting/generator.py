@@ -289,8 +289,17 @@ def render(snapshot: Snapshot, assessment: PortfolioAssessment) -> str:
         actual_policy = [
             row.model_dump(exclude=historical_controls) for row in assessment.policy_coverage
         ]
+        cors_bindings = {
+            finding.resource_id: finding.rule.evaluator
+            for finding in assessment.findings
+            if finding.rule.id == "APIM-SEC-020"
+        }
         expected_policy = [
-            coverage(instance, view).model_dump(exclude=historical_controls)
+            coverage(
+                instance,
+                view,
+                strict_cors=cors_bindings.get(instance.resource_id) != "permissive_cors",
+            ).model_dump(exclude=historical_controls)
             for instance in snapshot.instances
             for view in resolve(instance)
         ]

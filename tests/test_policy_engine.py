@@ -4,6 +4,7 @@ import json
 import pytest
 
 from apim_assess.analyzer.engine import EVALUATORS, analyze, scores
+from apim_assess.analyzer.evaluators.policy import coverage, evaluate
 from apim_assess.analyzer.policy_resolver import resolve
 from apim_assess.artifacts import digest
 from apim_assess.collector.sanitizer import (
@@ -11,6 +12,7 @@ from apim_assess.collector.sanitizer import (
     reference_id,
     sanitize_policy,
 )
+from apim_assess.models.findings import RuleSettings, Waiver
 from apim_assess.models.policy import (
     CollectionCoverage,
     Inventory,
@@ -323,6 +325,110 @@ def test_first_cors_and_base_order_control_result(policy_snapshot):
 def test_explicit_options_operation_prevents_cors_assurance(policy_snapshot):
     policy_snapshot.instances[0].inventory.resources[1].metadata.method = "OPTIONS"
     assert outcomes(policy_snapshot)["APIM-SEC-020"] == "unknown"
+
+
+@pytest.mark.parametrize(
+    ("origins", "attributes", "expected"),
+    [
+        ("", "", "not_applicable"),
+        ("<origin>https://app.example.test</origin>", "", "pass"),
+        ("<origin>*</origin>", 'allow-credentials="false"', "fail"),
+        ("<origin>*</origin>", "", "fail"),
+        ("<origin>*</origin>", 'allow-credentials="@(false)"', "fail"),
+        ("<origin>https://app.example.test</origin><origin>*</origin>", "", "fail"),
+        ("<origin>{{unresolved-origin}}</origin><origin>*</origin>", "", "fail"),
+        ("<origin>{{unresolved-origin}}</origin>", "", "unknown"),
+    ],
+)
+def test_cors_rejects_all_confirmed_wildcards_for_anonymous_apis(
+    policy_snapshot, origins, attributes, expected
+):
+    cors = (
+        f"<cors {attributes}><allowed-origins>{origins}</allowed-origins></cors>" if origins else ""
+    )
+    put(policy_snapshot, "", cors, BACKEND)
+    finding = next(
+        row for row in analyze(policy_snapshot).findings if row.rule.id == "APIM-SEC-020"
+    )
+    assert finding.result.outcome == expected
+    assert finding.rule.evaluator == "cors_no_wildcards"
+    if expected == "fail":
+        assert "regardless of credentials or caller authentication" in finding.result.summary
+
+
+def test_conditional_wildcard_fails_even_when_other_path_is_explicit(policy_snapshot):
+    wildcard = "<cors><allowed-origins><origin>*</origin></allowed-origins></cors>"
+    put(
+        policy_snapshot,
+        "",
+        '<choose><when condition="@(context.Request.Method == &quot;GET&quot;)">'
+        + wildcard
+        + "</when><otherwise>"
+        + CORS
+        + "</otherwise></choose>",
+        BACKEND,
+    )
+    assert outcomes(policy_snapshot)["APIM-SEC-020"] == "fail"
+
+
+def test_strict_cors_keeps_environment_grading_and_waiver_evidence(policy_snapshot):
+    put(
+        policy_snapshot,
+        "",
+        '<cors allow-credentials="false"><allowed-origins><origin>*</origin>'
+        "</allowed-origins></cors>",
+        BACKEND,
+    )
+    for environment, severity in (("prod", "High"), ("non-prod", "Low")):
+        policy_snapshot.instances[0].environment = environment
+        finding = next(
+            row for row in analyze(policy_snapshot).findings if row.rule.id == "APIM-SEC-020"
+        )
+        assert finding.severity == severity and finding.result.outcome == "fail"
+    assessment = analyze(
+        policy_snapshot,
+        RuleSettings(
+            waivers=[Waiver(rule_id="APIM-SEC-020", justification="Synthetic exception")],
+            severity_overrides={"APIM-SEC-020": "Medium"},
+        ),
+    )
+    finding = next(row for row in assessment.findings if row.rule.id == "APIM-SEC-020")
+    assert finding.result.outcome == "fail" and finding.result.evidence
+    assert finding.waiver_justification == "Synthetic exception" and finding.severity == "Medium"
+    assert next(row for row in assessment.pillar_scores if row.pillar == "SEC").waived == 1
+    assert "Effective CORS allows wildcard origins" in render(policy_snapshot, assessment)
+
+
+def test_saved_legacy_cors_results_remain_reportable_and_verified(policy_snapshot):
+    policy_snapshot.schema_version = "1.2"
+    put(
+        policy_snapshot,
+        "",
+        '<cors allow-credentials="false"><allowed-origins><origin>*</origin>'
+        "</allowed-origins></cors>",
+        BACKEND,
+    )
+    current = analyze(policy_snapshot)
+    assert (
+        next(row for row in current.findings if row.rule.id == "APIM-SEC-020").result.outcome
+        == "fail"
+    )
+    legacy = current.model_copy(deep=True)
+    instance = policy_snapshot.instances[0]
+    views = resolve(instance)
+    legacy.policy_coverage = [coverage(instance, view, strict_cors=False) for view in views]
+    finding = next(row for row in legacy.findings if row.rule.id == "APIM-SEC-020")
+    finding.rule.evaluator = "permissive_cors"
+    finding.rule.title = "Effective CORS allows wildcard origins for protected APIs"
+    finding.result = evaluate("permissive_cors", instance, views, legacy.policy_coverage)
+    legacy.pillar_scores = scores(legacy.findings)
+    assert finding.result.outcome == "pass"
+    assert "Effective CORS allows wildcard origins for protected APIs" in render(
+        policy_snapshot, legacy
+    )
+    legacy.policy_coverage[0].cors = "absent"
+    with pytest.raises(ValueError, match="Policy coverage does not match"):
+        render(policy_snapshot, legacy)
 
 
 def test_concurrency_must_enclose_forwarding_and_consumption_by_key_is_unsupported(policy_snapshot):

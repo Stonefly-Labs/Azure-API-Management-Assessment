@@ -109,7 +109,7 @@ The hybrid rule engine ships with **45+ rules** mapped across the 5 WAF Pillars 
 | `APIM-SEC-017` | APIs allow anonymous access (`subscriptionRequired: false` and no OAuth2/JWT/Client Cert policy) | SEC / IM-1 | Critical | `apis` + Effective Policy |
 | `APIM-SEC-018` | APIs rely solely on subscription keys without OAuth 2.0 / Entra ID (`validate-jwt` / `validate-azure-ad-token`) | SEC / IM-1 | Medium | Effective Policy (`inbound`) |
 | `APIM-SEC-019` | Broken policy inheritance (`<base />` omitted in API or Operation scope, bypassing Global security) | SEC / OPS | Critical | Effective Policy Resolver |
-| `APIM-SEC-020` | Overly permissive CORS policy (`<origin>*</origin>` combined with `allow-credentials="true"` or on authenticated APIs) | SEC | High | Effective Policy (`inbound` CORS) |
+| `APIM-SEC-020` | Effective CORS policy permits wildcard origins (`<origin>*</origin>`), regardless of authentication or `allow-credentials` | SEC | High | Effective Policy (`inbound` CORS) |
 | `APIM-SEC-021` | Backend TLS certificate chain/name validation disabled (`validateCertificateChain: false`) | SEC / DP-3 | High | `backends[].properties.tls` |
 | `APIM-SEC-022` | Developer Portal has anonymous access or open self-service sign-up enabled without Entra ID SSO | SEC / IM-1, IM-5 | Medium | `portalsettings` / `signUp` / `identityProviders` |
 | `APIM-SEC-023` | API Inspector tracing (`enableTrace`) left enabled in production diagnostics | SEC / LT-4 | Medium | `diagnostics` |

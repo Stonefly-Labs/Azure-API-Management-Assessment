@@ -123,7 +123,7 @@ For each API and Operation, the analyzer constructs an **Effective Policy Model*
 - Evaluates effective policy posture across the inheritance chain:
   - **Authentication & Authorization:** `validate-jwt`, `validate-azure-ad-token`, `validate-client-certificate`, `authentication-managed-identity`.
   - **Traffic Control & DoS Protection:** `rate-limit`, `rate-limit-by-key`, `quota`, `quota-by-key`, `limit-concurrency`, `azure-openai-token-limit` / `llm-token-limit`.
-  - **Input & Protocol Security:** `validate-content`, `validate-parameters`, `validate-headers`, `validate-graphql-request`, `cors` (flagging wildcard `*` with credentials), `ip-filter`, `check-header`.
+  - **Input & Protocol Security:** `validate-content`, `validate-parameters`, `validate-headers`, `validate-graphql-request`, `cors` (any confirmed effective wildcard origin fails the assessment baseline, regardless of credentials or authentication), `ip-filter`, `check-header`.
   - **Resiliency & Routing:** `retry`, `forward-request` timeout settings, `set-backend-service` (abstracted backend vs. hardcoded URL), `<on-error>` custom error handling.
   - **Information Disclosure & Hardening:** Outbound `set-header` removing `X-Powered-By`, `X-AspNet-Version`, `Server`; absence of hardcoded secrets in policy expressions.
 
