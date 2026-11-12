@@ -109,7 +109,7 @@ The hybrid rule engine ships with **45+ rules** mapped across the 5 WAF Pillars 
 | `APIM-SEC-017` | APIs allow anonymous access (`subscriptionRequired: false` and no OAuth2/JWT/Client Cert policy) | SEC / IM-1 | Critical | `apis` + Effective Policy |
 | `APIM-SEC-018` | APIs rely solely on subscription keys without OAuth 2.0 / Entra ID (`validate-jwt` / `validate-azure-ad-token`) | SEC / IM-1 | Medium | Effective Policy (`inbound`) |
 | `APIM-SEC-019` | Broken policy inheritance (`<base />` omitted in API or Operation scope, bypassing Global security) | SEC / OPS | Critical | Effective Policy Resolver |
-| `APIM-SEC-020` | Overly permissive CORS policy (`<origin>*</origin>` combined with `allow-credentials="true"` or on authenticated APIs) | SEC | High | Effective Policy (`inbound` CORS) |
+| `APIM-SEC-020` | Effective CORS policy permits wildcard origins (`<origin>*</origin>`), regardless of authentication or `allow-credentials` | SEC | High | Effective Policy (`inbound` CORS) |
 | `APIM-SEC-021` | Backend TLS certificate chain/name validation disabled (`validateCertificateChain: false`) | SEC / DP-3 | High | `backends[].properties.tls` |
 | `APIM-SEC-022` | Developer Portal has anonymous access or open self-service sign-up enabled without Entra ID SSO | SEC / IM-1, IM-5 | Medium | `portalsettings` / `signUp` / `identityProviders` |
 | `APIM-SEC-023` | API Inspector tracing (`enableTrace`) left enabled in production diagnostics | SEC / LT-4 | Medium | `diagnostics` |
@@ -153,7 +153,7 @@ The hybrid rule engine ships with **45+ rules** mapped across the 5 WAF Pillars 
 | `APIM-AIGW-004` | Azure OpenAI / LLM API lacks token metric emission (`azure-openai-emit-token-metric` / `llm-emit-token-metric`) for chargeback/observability | OPS / COST | Medium | Effective Policy |
 | `APIM-AIGW-005` | GraphQL API missing `<validate-graphql-request>` policy with `max-size` and `max-depth` protections | SEC / PERF | High | GraphQL API (`type == graphql`) + Effective Policy |
 
-**Planned Iteration 9 addition, not part of the implemented catalog:**
+**Iteration 9 addition (55 implemented rules total):**
 
 | Rule ID | Title | WAF | Prod Severity | Non-Prod Severity | Signal Source |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -334,9 +334,22 @@ data must not be copied into source, fixtures, or committed artifacts.
 resources, inspect their effective policies with the same evidence discipline as
 REST APIs, and flag MCP endpoints without configured OAuth token validation.
 
-**Status and gate:** Planned, not implemented. Start implementation only after a
-human has merged Iteration 8 and explicitly requested advancement. Recording this
-plan does not waive that gate or add a runtime rule.
+**Status and gate:** Implemented after the human merge of Iteration 8 and explicit
+advancement request. Delivery remains subject to the verification checklist
+below and human review/merge; this iteration does not authorize another phase.
+
+**Implemented contract and limits:** Native discovery, metadata and policies use
+`2025-09-01-preview`; ordinary resource reads retain `2024-05-01`. The A2A
+discriminator/projection follows Microsoft's APIOps ARM sample linked below
+because the published REST schema does not yet expose the full A2A shape.
+Snapshots/findings advance to `1.5`, preserving historical `1.0`-`1.4` replay.
+MCP server and A2A entry points use verified global/API inheritance. A2A operation
+policies are retained separately, not credited as entry-point protection without
+verified execution semantics. Workspace execution is unsupported; product execution remains
+unresolved instead of inheriting REST assumptions. Passthrough tool lists are
+management-plane metadata, not data-plane discovery. Generic caller-auth rules
+remain separate from the stricter MCP OAuth rule and each rule scores once per
+instance, not once per tool. No new MCSB mapping is inferred.
 
 1. **Capability-aware discovery and sanitized collection:**
    - Pin an authoritative management API contract that exposes MCP resources
@@ -436,11 +449,12 @@ plan does not waive that gate or add a runtime rule.
    - No release, resource remediation, general MCP client, A2A task runner,
      prompt-injection scanner or unrelated catalog expansion.
 
-**Microsoft grounding (reverify when implementing):**
+**Microsoft grounding (verified for implementation):**
 - [MCP resource model and management API](https://learn.microsoft.com/en-us/azure/api-management/manage-mcp-servers-rest-api)
 - [MCP capabilities and limitations](https://learn.microsoft.com/en-us/azure/api-management/mcp-server-overview)
 - [Secure inbound and outbound MCP access](https://learn.microsoft.com/en-us/azure/api-management/secure-mcp-servers)
 - [A2A API capabilities and policy scope](https://learn.microsoft.com/en-us/azure/api-management/agent-to-agent-api)
+- [Microsoft APIOps A2A ARM contract example](https://github.com/Azure/apiops-cli/blob/main/tests/integration/all-resource-types/bicep/source-apim.bicep)
 - [Validate JWT policy](https://learn.microsoft.com/en-us/azure/api-management/validate-jwt-policy)
 - [Validate Microsoft Entra token policy](https://learn.microsoft.com/en-us/azure/api-management/validate-azure-ad-token-policy)
 

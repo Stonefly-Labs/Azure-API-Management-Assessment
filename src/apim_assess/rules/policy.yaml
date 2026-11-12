@@ -66,18 +66,18 @@
   evaluator: runaway_load
 
 - id: APIM-SEC-020
-  title: Effective CORS allows wildcard origins for protected APIs
+  title: Effective CORS allows wildcard origins
   pillar: SEC
   severity: High
   non_prod_severity: Low
-  applicability: First effective inbound CORS policy; no CORS is not applicable and explicit OPTIONS operations are unknown.
-  required_signals: [apis.subscriptionRequired, operations, effective_policy.inbound]
-  description: Flag a wildcard origin combined with credentials or configured caller protection. This is a configuration review, not proof of browser credential disclosure or an exploit.
+  applicability: First effective inbound CORS policy on each collected execution path, regardless of authentication, subscription requirements or credential settings. No CORS is not applicable and explicit OPTIONS operations are unknown.
+  required_signals: [operations, effective_policy.inbound]
+  description: Fail any confirmed wildcard origin in an applicable CORS policy, including one conditional path, even when credentials are disabled or callers are anonymous. Require explicit origins as the assessment baseline. This is a configuration review, not proof of browser credential disclosure or an exploit.
   business_impact: Broad cross-origin access can conflict with the intended browser-facing trust boundary.
   remediation: Replace wildcard origins with the intended origin allowlist and review credential requirements and preflight behavior.
   references:
     - https://learn.microsoft.com/en-us/azure/api-management/cors-policy
-  evaluator: permissive_cors
+  evaluator: cors_no_wildcards
 
 - id: APIM-OPS-002
   title: API uses a literal backend URL instead of a backend entity

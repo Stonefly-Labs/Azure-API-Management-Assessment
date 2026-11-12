@@ -1,14 +1,14 @@
 # apim-assess
 
-Read-only Azure API Management assessment CLI. **Iterations 1-8**: core
+Read-only Azure API Management assessment CLI. **Iterations 1-9**: core
 configuration, Azure Monitor metrics, sanitized sub-resource inventory,
-effective XML policies, 54 deterministic rules, linked networking/governance
+effective XML policies, 55 deterministic rules, linked networking/governance
 metadata, optional aggregate Log Analytics queries, validated rule
 waivers/thresholds, and a self-contained HTML deck and deep-dive explorer
 with effective policy and partial MCSB coverage matrices, optional upstream
 WAF probes, LLM/GraphQL checks, a remediation roadmap and container packaging,
 focused report navigation, deep sanitized policy scans, and dimensional telemetry
-with inline SVG trend charts.
+with inline SVG trend charts, native MCP/A2A inventories and MCP OAuth posture.
 
 ## Install
 
@@ -130,6 +130,55 @@ Microsoft grounding: [APIM monitoring reference](https://learn.microsoft.com/en-
 [Monitor Metrics List API](https://learn.microsoft.com/en-us/rest/api/monitor/metrics/list),
 and [gateway log columns](https://learn.microsoft.com/en-us/azure/azure-monitor/reference/tables/apimanagementgatewaylogs).
 
+### Iteration 9: MCP/A2A inventory and incoming OAuth
+
+Collection pins `2025-09-01-preview` for native API discovery, MCP tool resources
+and MCP/A2A metadata/policies. Native `mcp` and `a2a` types come from ARM metadata,
+never API names. REST-backed MCP tools retain their backing API-operation path;
+passthrough servers retain safe transport/endpoint counts. Agent identifiers,
+agent-card/runtime paths and backend references are hashed, and URLs are only
+classified. No MCP invocation, A2A task, agent-card fetch, tool schema or secret
+read is performed.
+
+Overview and API policy coverage show per-instance native counts, discovery
+status, safe metadata, tool bindings and independent policy/tool coverage.
+A failed preview read falls back to ordinary API inventory without claiming
+complete native discovery. Partial pages, unknown API types and unresolved
+bindings remain explicit gaps. New artifacts use schema `1.5`; historical
+`1.0`-`1.4` snapshots, digests and saved findings remain replayable. Historical
+snapshots say native coverage was not collected, not that no servers exist.
+
+`APIM-AIGW-006` requires effective incoming `validate-jwt` or
+`validate-azure-ad-token` at each MCP server entry point. The sanitizer preserves
+a secret-free configuration marker for issuer/tenant, signature/expiry and
+audience/client restrictions. Effective inheritance, fragments and every
+conditional path must establish protection. Confirmed absence fails High in
+production and Medium in non-production, with **"MCP should be secured using
+OAuth 2.0."** Missing evidence or unverified configuration is unknown.
+Waivers/severity overrides retain the same evidence; tools never multiply
+this rule's score.
+
+This is a stricter assessment baseline than APIM's supported key-only option.
+Keys, client certificates, portal OAuth settings, forwarded tokens, backend
+identity and validation on a backing REST operation do not satisfy it. Generic
+`APIM-SEC-017`/`018` findings remain separate, broader caller-authentication
+checks; passing one is not an MCP OAuth pass. No OAuth discovery, PKCE or runtime
+enforcement certification is claimed, and no new MCSB mapping is inferred.
+
+MCP/A2A global/API policies are inspected. Collected A2A operation policies are
+retained but do not establish protection at the agent entry point without
+verified operation-scope execution semantics. Workspace execution is unsupported;
+product execution is unresolved
+rather than assumed to follow REST semantics. REST request-body/cache/forwarding
+checks are unsupported for these protocols, and native typing alone never
+establishes an LLM workload. Management-plane passthrough tool inventory is not
+data-plane tool discovery.
+
+Microsoft grounding: [MCP management](https://learn.microsoft.com/en-us/azure/api-management/manage-mcp-servers-rest-api),
+[MCP security](https://learn.microsoft.com/en-us/azure/api-management/secure-mcp-servers),
+[A2A policies](https://learn.microsoft.com/en-us/azure/api-management/agent-to-agent-api),
+and [Microsoft's A2A ARM sample](https://github.com/Azure/apiops-cli/blob/main/tests/integration/all-resource-types/bicep/source-apim.bicep).
+
 ## Assessment decisions and limits
 
 Iteration 1 preserved the five named seed IDs despite the plan's "one per
@@ -149,7 +198,7 @@ compliance or overall health score is claimed.
 | APIM-SEC-017 | API or open-product contexts without subscription requirements need a configured unconditional JWT, Entra-token or client-certificate validator. Portal OAuth settings and gateway-to-backend authentication do not validate callers. |
 | APIM-SEC-018 | Subscription-required contexts need JWT/Entra caller validation; a configured certificate validator is an alternative, not a keys-only failure. |
 | APIM-COST-004 | Positive fixed rate limits or concurrency limits enclosing forwarding satisfy the configuration check. Subscription limits require a key and a product/API/operation scope. Consumption does not support rate-limit-by-key. Dynamic limits and conditional increments are unknown. |
-| APIM-SEC-020 | Review wildcard origins with credentials or configured caller protection, using the first effective CORS policy. This is not a browser exploit claim. Missing CORS is not applicable; dynamic origins and explicit OPTIONS operations are unknown. |
+| APIM-SEC-020 | Any confirmed wildcard origin in the first effective CORS policy on an assessed path fails, regardless of authentication, subscription requirements or credentials. Explicit origin allowlists satisfy this assessment baseline; it is not a browser exploit claim. Missing CORS is not applicable; unresolved origins and explicit OPTIONS operations are unknown. Historical findings retain their saved interpretation. |
 | APIM-OPS-002 | Evaluate ordered routing overrides: a literal effective URL fails; a collected backend-entity reference passes. Named-value/expression routes and unresolved references are unknown. |
 
 ### Iteration 3 decisions

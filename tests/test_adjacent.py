@@ -9,7 +9,13 @@ from azure.core.credentials import AccessToken
 from pydantic import ValidationError
 from typer.testing import CliRunner
 
-from apim_assess.analyzer.engine import ITERATION_4_IDS, ITERATION_5_IDS, analyze, scores
+from apim_assess.analyzer.engine import (
+    ITERATION_4_IDS,
+    ITERATION_5_IDS,
+    ITERATION_9_IDS,
+    analyze,
+    scores,
+)
 from apim_assess.cli import app
 from apim_assess.collector.apim_core import SAFE_CUSTOM_PROPERTIES, collect
 from apim_assess.collector.client import ArmReader
@@ -1039,7 +1045,7 @@ def test_legacy_iteration_three_digest_and_report_remain_usable(adjacent_snapsho
     assessment.findings = [
         item
         for item in assessment.findings
-        if item.rule.id not in ITERATION_4_IDS | ITERATION_5_IDS
+        if item.rule.id not in ITERATION_4_IDS | ITERATION_5_IDS | ITERATION_9_IDS
     ]
     from apim_assess.analyzer.engine import mcsb_coverage, mcsb_score
 
@@ -1186,9 +1192,9 @@ def test_mocked_multi_instance_adjacent_assess_replays_offline(
     assert result.exit_code == 0, result.output
     saved = Snapshot.model_validate_json((output / "snapshot.json").read_text())
     assessment = PortfolioAssessment.model_validate_json((output / "findings.json").read_text())
-    assert saved.schema_version == assessment.schema_version == "1.4"
+    assert saved.schema_version == assessment.schema_version == "1.5"
     assert [item.environment for item in saved.instances] == ["prod", "non-prod"]
-    assert len(assessment.findings) == 108
+    assert len(assessment.findings) == 110
     assert len(queries) == 2 and all(
         any(identifier in query for query in queries) for identifier in identifiers
     )

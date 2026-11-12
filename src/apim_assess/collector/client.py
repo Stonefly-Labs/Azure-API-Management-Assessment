@@ -4,7 +4,7 @@ import asyncio
 import re
 import time
 from collections.abc import AsyncIterator
-from urllib.parse import quote, urlsplit
+from urllib.parse import parse_qsl, quote, urlsplit
 from uuid import UUID
 
 import httpx
@@ -238,5 +238,16 @@ class ArmReader:
             link = body.get("nextLink")
             if link is not None and not isinstance(link, str):
                 raise AzureReadError("INVALID_PAGINATION")
+            if link:
+                query = urlsplit(link).query
+                versions = [
+                    value
+                    for key, value in parse_qsl(query, keep_blank_values=True)
+                    if key.casefold() == "api-version"
+                ]
+                if versions and versions != [version]:
+                    raise AzureReadError("INVALID_PAGINATION")
+                if not versions:
+                    link += ("&" if query else "?") + "api-version=" + version
             next_url = link or None
             params = None

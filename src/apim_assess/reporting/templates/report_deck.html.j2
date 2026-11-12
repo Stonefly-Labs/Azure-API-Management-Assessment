@@ -217,7 +217,9 @@ svg text { fill: var(--cp-text); font-size: 15px; }
 <div class="legend">{% for outcome, count in counts.items() %}<span><i class="o-{{ outcome }}"></i>{{ "N/A" if outcome == "not_applicable" else outcome | capitalize }} {{ count }}</span>{% endfor %}</div>
 {%- endmacro %}
 {% macro open_rule(id, label, resource_id=none) -%}
+{% if id in rule_ids %}
 <button type="button" class="text-button" data-open="{{ id }}"{% if resource_id %} data-resource="{{ resource_id }}"{% endif %}>{{ label }}</button>
+{% else %}{{ label }}{% endif %}
 {%- endmacro %}
 <body data-mode="focused">
 <a href="#main" class="skip-link">Skip to assessment</a>
@@ -300,6 +302,15 @@ svg text { fill: var(--cp-text); font-size: 15px; }
       {% for finding in watch.rows %}<tr><td>{{ open_rule(finding.rule.id, finding.rule.title, finding.resource_id) }}</td><td>{{ identities[finding.resource_id].name }}</td><td>{{ finding.severity }}</td><td>{{ finding.rule.severity }}</td></tr>{% endfor %}
       </tbody></table></div>
     </div>{% endif %}
+    <article class="card">
+      <div class="section-head"><h2>AI gateway capabilities / MCP &amp; A2A</h2><button class="text-button" type="button" data-goto="policy">Inspect inventory &amp; policies</button></div>
+      {% for gateway in gateway_summary(scope.instances) %}
+      <p><strong>{{ gateway.instance.name }}</strong> / Native inventory: <strong>{{ gateway.status }}</strong>.
+        {% if gateway.status != "Not collected" %}{{ gateway.mcp_count }} MCP servers / {{ gateway.a2a_count }} A2A APIs / {{ gateway.tools | length }} MCP tools observed.
+        {% if gateway.status != "Complete" %}Counts are partial observations, not confirmed absence.{% endif %}
+        {% else %}MCP/A2A coverage is not collected, not zero servers or a security pass.{% endif %}</p>
+      {% endfor %}
+    </article>
     <h2>{{ "%g" | format(telemetry_days) }}-Day Telemetry &amp; Trends</h2>
     <p class="small muted">Saved window: {{ snapshot.telemetry_start.isoformat() }} to {{ snapshot.telemetry_end.isoformat() }}.
       Daily UTC rollups of observed hourly samples. Missing samples are not zero; partial-day totals are incomplete.
@@ -499,8 +510,46 @@ svg text { fill: var(--cp-text); font-size: 15px; }
     </tbody></table></div>
   </section>
   <section class="panel" id="scope-{{ s }}-policy" data-panel="policy" role="tabpanel" aria-labelledby="tab-policy" tabindex="0" hidden>
+    <h2>Native MCP servers &amp; A2A agent APIs</h2>
+    <p class="small muted">Read-only management inventory; no tool invocation, agent task or agent-card URL fetch. MCP incoming OAuth is assessed by {{ open_rule("APIM-AIGW-006", "APIM-AIGW-006") }} when included in this catalog. Backing REST policies are a separate boundary and do not establish MCP entry-point protection. Product-policy execution is not credited without verified protocol semantics.</p>
+    {% for gateway in gateway_summary(scope.instances) %}<article class="card gateway-inventory">
+      <h3>{{ gateway.instance.name }} / native API discovery: {{ gateway.status }}</h3>
+      {% if gateway.status == "Not collected" %}<p class="notice">MCP/A2A coverage was not collected by this snapshot. No absence or OAuth pass is inferred.</p>
+      {% else %}
+      <p>{{ gateway.mcp_count }} MCP servers / {{ gateway.a2a_count }} A2A APIs / {{ gateway.tools | length }} MCP tools observed. {% if gateway.status != "Complete" %}Inventory is incomplete; zero observations do not establish absence.{% endif %}</p>
+      {% for api in gateway.resources %}
+      <details class="gateway-api"><summary><strong>{{ api.name }}</strong> / {{ api.metadata.api_type | upper }} / <code>{{ api.path }}</code></summary>
+        <p>Workspace: {{ api.workspace or "Service-level managed gateway" }}. {% if api.workspace %}MCP/A2A workspace execution is unsupported in this assessment.{% endif %}</p>
+        {% set policy = gateway.instance.inventory.policies.get(api.path) %}
+        <p>Entry-point policy: {{ policy.status if policy else "Not collected" }}. Protocols: {{ api.metadata.protocols | join(", ") if api.metadata.protocols else "Not collected" }}.</p>
+        {% set metadata_coverage = gateway.instance.inventory.collections.get(api.path) %}
+        <p>Protocol metadata coverage: {{ metadata_coverage.status if metadata_coverage else "Not collected" }}. API discovery does not establish complete tool, metadata or policy coverage.</p>
+        {% if api.gateway %}
+        <dl class="kv">
+          <dt>Mode</dt><dd>{{ api.gateway.mode }}</dd>
+          <dt>Transport</dt><dd>{{ api.gateway.transport or "Not collected" }}</dd>
+          <dt>Endpoint definitions</dt><dd>{{ api.gateway.endpoint_count if api.gateway.endpoint_count is not none else "Not collected" }}</dd>
+          <dt>Runtime URL metadata</dt><dd>{{ api.gateway.runtime_url_kind }} / URL not retained</dd>
+          {% if api.metadata.api_type == "a2a" %}
+          <dt>Agent-card URL metadata</dt><dd>{{ api.gateway.agent_card_url_kind }} / URL not retained</dd>
+          <dt>Agent-card path reference</dt><dd><code>{{ api.gateway.agent_card_path_hash or "Not collected" }}</code></dd>
+          <dt>Runtime path reference</dt><dd><code>{{ api.gateway.runtime_path_hash or "Not collected" }}</code></dd>
+          <dt>Agent reference</dt><dd><code>{{ api.gateway.agent_id_hash or "Not collected" }}</code></dd>
+          {% endif %}
+        </dl>
+        {% else %}<p>Protocol metadata not collected. Check collection warnings.</p>{% endif %}
+        {% if api.metadata.api_type == "mcp" %}
+        <p>{{ open_rule("APIM-AIGW-006", "Review incoming OAuth evidence", gateway.instance.resource_id) }}. Keys, forwarded tokens, portal OAuth settings and backend identity do not satisfy this assessment baseline.</p>
+        {% set tool_coverage = gateway.instance.inventory.collections.get(api.path ~ "/tools") %}
+        <p>Tool inventory: {{ tool_coverage.status if tool_coverage else "Not collected" }}. Passthrough inventory is management-plane metadata, not data-plane tool discovery.</p>
+        <ul>{% for tool in gateway.tools if tool.path.startswith(api.path ~ "/tools/") %}<li><strong>{{ tool.name }}</strong> / <code>{{ tool.path }}</code><br>Backing REST operation: <code>{{ tool.gateway.backing_operation_path if tool.gateway and tool.gateway.backing_operation_path else "Not collected / external passthrough" }}</code></li>{% else %}<li>No managed tool resources observed; inspect coverage before concluding none exist.</li>{% endfor %}</ul>
+        {% endif %}
+      </details>
+      {% else %}<p>No native MCP/A2A resources observed. {% if gateway.status != "Complete" %}This is not confirmed absence.{% endif %}</p>{% endfor %}
+      {% endif %}
+    </article>{% endfor %}
     <h2>Effective policy coverage / API summary</h2>
-    <p class="small muted">Each API rolls up every operation and product/non-product execution context. Present = configured control satisfies the check; absent = check not satisfied. CORS means the wildcard-origin check. Counts are contexts, not API health scores or runtime proof.</p>
+    <p class="small muted">Each API rolls up collected execution contexts. MCP rows cover the server entry point, not tools disguised as REST operations. Present = configured control satisfies the generic check; absent = check not satisfied. CORS means the wildcard-origin check. MCP's stronger incoming OAuth baseline is evaluated separately in APIM-AIGW-006. Counts are contexts, not API health scores or runtime proof.</p>
     {% for api in policy_summary(scope.policy_coverage) %}<article class="card policy-api">
       <h3>{{ api.api_path }}</h3><p class="small muted">{{ identities[api.resource_id].name }} / {{ api.operations }} operations / {{ api.rows | length }} contexts</p>
       <div class="table-wrap"><table><thead><tr>{% for label in policy_controls.values() %}<th>{{ label }}</th>{% endfor %}</tr></thead><tbody><tr>
@@ -537,10 +586,10 @@ svg text { fill: var(--cp-text); font-size: 15px; }
     </div>
     <article class="card"><h2>Assessment scope &amp; compatibility</h2>
       <p>{% if legacy %}Legacy findings: five service rules, no policy assessment.{% elif iteration == "2" %}Five service rules and six policy rules. Historical policy interpretations are preserved; rerun analyze to apply current checks.{% else %}Core APIM five-pillar catalog; {{ scope.findings | length }} rule results in this scope.{% endif %} Not a complete MCSB compliance assessment.</p>
-      <p>{% if iteration in ["4", "5"] %}Linked network/governance metadata and optional aggregate gateway logs are included when available.{% else %}Adjacent-network analysis remains outside this historical assessment.{% endif %} {% if iteration != "5" %}Upstream WAF and AI gateway analysis remain outside scope.{% endif %}</p>
+      <p>{% if iteration in ["4", "5", "9"] %}Linked network/governance metadata and optional aggregate gateway logs are included when available.{% else %}Adjacent-network analysis remains outside this historical assessment.{% endif %} {% if iteration not in ["5", "9"] %}Upstream WAF and AI gateway analysis remain outside scope.{% endif %}</p>
       {% for instance in scope.instances %}<p><strong>{{ instance.name }}</strong> / {{ instance.environment }} ({{ instance.environment_source }})<br><code>{{ instance.resource_id }}</code></p>{% endfor %}
     </article>
-    {% if iteration == "5" %}<article class="card">
+    {% if iteration in ["5", "9"] %}<article class="card">
       <h2>Upstream WAF &amp; AI gateway</h2>
       <p>Upstream matching uses observed gateway hostnames/IPs in the authorized scope, not DNS traversal. A WAF attachment alone is not origin lockdown. HTTPS forwarding, bot/rate controls and probes are configuration observations, not live traffic tests.</p>
       {% for instance in scope.instances %}<h3>{{ instance.name }}</h3>

@@ -37,4 +37,4 @@ jobs:
           docker run --rm --network none -v "$PWD/tests/fixtures:/input:ro" -v "$PWD/container-output:/output" apim-assess:ci analyze --snapshot /input/sample_multi_apim_snapshot.json --output /output/findings.json
           docker run --rm --network none -v "$PWD/tests/fixtures:/input:ro" -v "$PWD/container-output:/output" apim-assess:ci report --snapshot /input/sample_multi_apim_snapshot.json --findings /output/findings.json --output /output/report.html
           test -s container-output/report.html
-          docker run --rm --network none -v "$PWD/container-output:/output:ro" --entrypoint python apim-assess:ci -c 'import json; d=json.load(open("/output/findings.json")); assert d["schema_version"] == "1.4"; assert len(d["findings"]) == 162; assert any(f["rule"]["id"] == "APIM-AIGW-005" for f in d["findings"])'
+          docker run --rm --network none -v "$PWD/container-output:/output:ro" --entrypoint python apim-assess:ci -c 'import json; d=json.load(open("/output/findings.json")); assert d["schema_version"] == "1.5"; assert len(d["findings"]) == 165; assert any(f["rule"]["id"] == "APIM-AIGW-006" for f in d["findings"])'

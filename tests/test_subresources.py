@@ -186,7 +186,11 @@ def handler(request):
             200,
             json={
                 "value": values[path],
-                "nextLink": ARM + ID + "/apis?api-version=2024-05-01&page=2",
+                "nextLink": ARM
+                + ID
+                + "/apis?api-version="
+                + request.url.params["api-version"]
+                + "&page=2",
             },
         )
     if path == "policies/policy":
@@ -240,7 +244,7 @@ def test_paginated_all_kinds_workspace_policies_and_safe_metadata_projection():
     }
     assert SECRET not in snapshot.model_dump_json()
     assessment = analyze(snapshot)
-    assert len(assessment.findings) == 54
+    assert len(assessment.findings) == 55
     assert len(assessment.policy_coverage) == 4
     assert all(row.jwt == "present" for row in assessment.policy_coverage)
     assert any(item.metadata.key_vault for item in inventory.resources)
@@ -426,7 +430,7 @@ def test_composed_policy_pipeline_and_offline_replay_agree(tmp_path, monkeypatch
     )
     assert result.exit_code == 0, result.output
     saved = Snapshot.model_validate_json((directory / "snapshot.json").read_text())
-    assert saved.schema_version == "1.4"
+    assert saved.schema_version == "1.5"
     assert saved.instances[0].inventory
 
     def forbidden(*args, **kwargs):

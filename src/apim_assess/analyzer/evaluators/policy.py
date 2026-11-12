@@ -28,6 +28,7 @@ BINDINGS: dict[str, Check] = {
     "subscription_jwt": "jwt",
     "runaway_load": "rate_limit",
     "permissive_cors": "cors",
+    "cors_no_wildcards": "cors",
     "backend_reference": "backend",
 }
 OPAQUE = {
@@ -175,7 +176,7 @@ def _rate(instance: Instance, view: EffectivePolicy) -> ControlState:
     return guaranteed(view.sections["inbound"] + view.sections["backend"], predicate)
 
 
-def _cors(view: EffectivePolicy) -> ControlState:
+def _cors(view: EffectivePolicy, *, strict_cors: bool = True) -> ControlState:
     def first(nodes: list[PolicyNode]) -> list[PolicyNode | None]:
         possibilities: list[PolicyNode | None] = [None]
         for node in nodes:
@@ -211,11 +212,14 @@ def _cors(view: EffectivePolicy) -> ControlState:
             for origin in child.children
             if origin.tag == "origin"
         ]
-        if not origins:
+        wildcard = any(origin.text == "*" for origin in origins)
+        if strict_cors and wildcard:
+            outcomes.add("absent")
+        elif not origins:
             outcomes.add("unknown")
         elif any(origin.text not in {"*", LITERAL_ORIGIN} for origin in origins):
             outcomes.add("unknown")
-        elif any(origin.text == "*" for origin in origins):
+        elif wildcard:
             credentials = node.attributes.get("allow-credentials", "false")
             auth = _identity(view)
             if credentials == "true" or view.subscription_required is True or auth == "present":
@@ -226,6 +230,8 @@ def _cors(view: EffectivePolicy) -> ControlState:
                 outcomes.add("present")
         else:
             outcomes.add("present")
+    if strict_cors and "absent" in outcomes:
+        return "absent"
     return outcomes.pop() if len(outcomes) == 1 else "unknown"
 
 
@@ -398,13 +404,15 @@ def _backend(instance: Instance, view: EffectivePolicy) -> ControlState:
     return outcomes.pop() if len(outcomes) == 1 else "unknown"
 
 
-def coverage(instance: Instance, view: EffectivePolicy) -> PolicyCoverage:
+def coverage(
+    instance: Instance, view: EffectivePolicy, *, strict_cors: bool = True
+) -> PolicyCoverage:
     inheritance: ControlState = (
         "absent" if view.missing_base else "unknown" if view.issues else "present"
     )
     if any(issue.startswith("Protocol ") for issue in view.issues):
         inheritance = "unknown"
-    cors = _cors(view)
+    cors = _cors(view, strict_cors=strict_cors)
     if instance.inventory is not None and any(
         item.path == view.operation_path and item.metadata.method == "OPTIONS"
         for item in instance.inventory.resources
@@ -505,6 +513,11 @@ def evaluate(
         "not_applicable": "No applicable API execution contexts for this check.",
         "unsupported": "Rate-limit-by-key is unsupported on the Consumption gateway.",
     }[outcome]
+    if binding == "cors_no_wildcards" and outcome == "fail":
+        label = (
+            "An effective CORS policy allows wildcard origins. This assessment requires "
+            "explicit origins regardless of credentials or caller authentication."
+        )
     if not complete:
         evidence.append(
             Evidence(
