@@ -170,27 +170,25 @@ def project_service(
     instance.core_status = "available"
     instance.location = service.location
     instance.sku = Sku.model_validate(service.sku.model_dump()) if service.sku else None
-    instance.zones = service.zones
-    if props.additionalLocations is not None:
-        instance.additional_locations = [
-            Region(
-                location=region.location,
-                zones=region.zones,
-                capacity=region.sku.capacity if region.sku else None,
-            )
-            for region in props.additionalLocations
-        ]
+    instance.zones = service.zones or []
+    instance.additional_locations = [
+        Region(
+            location=region.location,
+            zones=region.zones,
+            capacity=region.sku.capacity if region.sku else None,
+        )
+        for region in (props.additionalLocations or [])
+    ]
     instance.virtual_network_type = props.virtualNetworkType
     instance.public_network_access = props.publicNetworkAccess
-    if props.privateEndpointConnections is not None:
-        instance.private_endpoint_statuses = [
-            (
-                connection.properties.privateLinkServiceConnectionState.status or "Unknown"
-                if connection.properties and connection.properties.privateLinkServiceConnectionState
-                else "Unknown"
-            )
-            for connection in props.privateEndpointConnections
-        ]
+    instance.private_endpoint_statuses = [
+        (
+            connection.properties.privateLinkServiceConnectionState.status or "Unknown"
+            if connection.properties and connection.properties.privateLinkServiceConnectionState
+            else "Unknown"
+        )
+        for connection in (props.privateEndpointConnections or [])
+    ]
     instance.identity_type = service.identity.type if service.identity else None
     instance.custom_properties = {
         key: str(value).casefold() == "true"

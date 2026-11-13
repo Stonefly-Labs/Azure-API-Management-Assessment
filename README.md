@@ -1,6 +1,6 @@
 # apim-assess
 
-Read-only Azure API Management assessment CLI. **Iterations 1-9**: core
+Read-only Azure API Management assessment CLI. **Iterations 1-10**: core
 configuration, Azure Monitor metrics, sanitized sub-resource inventory,
 effective XML policies, 55 deterministic rules, linked networking/governance
 metadata, optional aggregate Log Analytics queries, validated rule
@@ -8,7 +8,10 @@ waivers/thresholds, and a self-contained HTML deck and deep-dive explorer
 with effective policy and partial MCSB coverage matrices, optional upstream
 WAF probes, LLM/GraphQL checks, a remediation roadmap and container packaging,
 focused report navigation, deep sanitized policy scans, and dimensional telemetry
-with inline SVG trend charts, native MCP/A2A inventories and MCP OAuth posture.
+with inline SVG trend charts, native MCP/A2A inventories, MCP OAuth posture,
+and a repeatable Azure validation lab with paired APIM profiles, Microsoft Foundry
+deployments, Entra-secured Python Container Apps, and automated lifecycle workflows.
+
 
 ## Install
 
@@ -178,6 +181,35 @@ Microsoft grounding: [MCP management](https://learn.microsoft.com/en-us/azure/ap
 [MCP security](https://learn.microsoft.com/en-us/azure/api-management/secure-mcp-servers),
 [A2A policies](https://learn.microsoft.com/en-us/azure/api-management/agent-to-agent-api),
 and [Microsoft's A2A ARM sample](https://github.com/Azure/apiops-cli/blob/main/tests/integration/all-resource-types/bicep/source-apim.bicep).
+
+### Iteration 10: Azure validation lab and lifecycle automation
+
+`infra\lab\`, `samples\validation_lab\`, `scripts\lab\`, and `.github\workflows\lab-*.yml`
+provide a repeatable Azure validation environment in `westus3` (authored with Bicep
+Azure Verified Modules `br/public:avm/...` wherever available, plus direct preview/subresource
+declarations where AVM does not yet cover `2025-09-01-preview` native MCP/A2A) that exercises
+all 55 catalog rules across two contrasting gateways:
+
+- **Internal VNet Developer APIM (`apim-apv-dev-wus3-001`):** VNet-injected classic
+  Developer SKU with subnet NSG rules satisfying `APIM-SEC-001` and `APIM-SEC-003`,
+  paired with intentional negative policy, backend, subscription, named-value, diagnostic,
+  and AI Gateway configurations to exercise failure detection.
+- **Public Basic v2 APIM (`apim-apv-bv2-wus3-001`):** Public v2 gateway configured with
+  healthy baseline policies, Key Vault-linked secrets, product-scoped subscriptions,
+  Entra OAuth validation on REST/MCP/A2A/AI routes, backend circuit breakers and pools,
+  token limits, and token metric emission.
+- **Workloads & Foundry:** Three Python Container Apps (Orders REST API with OpenAPI spec,
+  Streamable HTTP MCP server with Entra JWT auth, and JSON-RPC A2A agent with Entra JWT auth)
+  plus Microsoft Foundry (`gpt-5.6-sol`, `gpt-5.4-mini`, `text-embedding-3-small`) and
+  VNet-connected Container Apps Jobs for smoke traffic and `apim-assess` execution.
+
+Run `python -m scripts.lab.bootstrap` once with local Azure + GitHub CLI credentials to
+provision persistent OIDC identities in `rg-apv-bootstrap-wus3-001`, configure Entra app
+registrations, and set GitHub `azure-lab` environment variables. Use `lab-deploy.yml`,
+`lab-validate.yml`, `lab-destroy.yml`, or `lab-integration.yml` to deploy, validate against
+`samples\validation_lab\expectations.yaml` (storing sanitized artifacts in private Azure
+Blob Storage), and tear down/purge all billable lab resources in `rg-apv-lab-wus3-001`.
+
 
 ## Assessment decisions and limits
 

@@ -1,0 +1,74 @@
+name: Lab Integration
+on:
+  workflow_dispatch:
+    inputs:
+      keep_lab_on_success:
+        description: "Keep disposable lab resources running after validation succeeds"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: azure-validation-lab-westus3
+  cancel-in-progress: false
+
+jobs:
+  end-to-end:
+    name: Deploy -> Validate (55 Rules) -> Destroy
+    runs-on: ubuntu-latest
+    environment: azure-lab
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install apim-assess and lab dependencies
+        run: python -m pip install -e ".[dev,lab]"
+      - name: Azure Login (Deploy OIDC Identity)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_DEPLOY_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Deploy Validation Lab
+        id: deploy
+        env:
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'westus3' }}
+          AZURE_BOOTSTRAP_RESOURCE_GROUP: ${{ vars.AZURE_BOOTSTRAP_RESOURCE_GROUP || 'rg-apv-bootstrap-wus3-001' }}
+          AZURE_LAB_RESOURCE_GROUP: ${{ vars.AZURE_LAB_RESOURCE_GROUP || 'rg-apv-lab-wus3-001' }}
+          LAB_ENTRA_GATEWAY_APP_ID: ${{ vars.LAB_ENTRA_GATEWAY_APP_ID }}
+          LAB_ENTRA_MCP_APP_ID: ${{ vars.LAB_ENTRA_MCP_APP_ID }}
+          LAB_ENTRA_A2A_APP_ID: ${{ vars.LAB_ENTRA_A2A_APP_ID }}
+          LAB_ENTRA_CLIENT_APP_ID: ${{ vars.LAB_ENTRA_CLIENT_APP_ID }}
+        run: |
+          python -m scripts.lab.deploy --phase all
+          STORAGE_NAME=$(python -c 'import json; print(json.load(open(".azure/lab-deployment.json"))["outputs"]["storageAccountName"])')
+          echo "storage_account_name=$STORAGE_NAME" >> "$GITHUB_OUTPUT"
+      - name: Validate Smoke Probes & 55-Rule Expectations Matrix
+        env:
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_LAB_RESOURCE_GROUP: ${{ vars.AZURE_LAB_RESOURCE_GROUP || 'rg-apv-lab-wus3-001' }}
+          LAB_STORAGE_ACCOUNT_NAME: ${{ steps.deploy.outputs.storage_account_name }}
+        run: |
+          python -m scripts.lab.validate --live --output-dir artifacts/lab-validation
+      - name: Upload Sanitized Assessment Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apim-assess-lab-integration-artifacts
+          path: artifacts/lab-validation/**
+          if-no-files-found: warn
+      - name: Tear Down Disposable Lab and Purge Soft-Delete Tombstones
+        if: always() && inputs.keep_lab_on_success != true
+        env:
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_LAB_RESOURCE_GROUP: ${{ vars.AZURE_LAB_RESOURCE_GROUP || 'rg-apv-lab-wus3-001' }}
+          AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'westus3' }}
+        run: |
+          python -m scripts.lab.destroy

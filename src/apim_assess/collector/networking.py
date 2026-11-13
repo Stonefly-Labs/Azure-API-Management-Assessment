@@ -263,10 +263,7 @@ async def collect_networking(
         or instance.sku.name == "PremiumV2"
         and instance.virtual_network_type == "Internal"
     )
-    if injected and (
-        topology.additionalLocations is None
-        or any(location.virtualNetworkConfiguration is None for location in locations)
-    ):
+    if injected and any(location.virtualNetworkConfiguration is None for location in locations):
         result.status = "partial"
         result.subnets_status = "partial"
         warning(warnings, instance.resource_id, "INCOMPLETE_SUBNET_LINKAGE")

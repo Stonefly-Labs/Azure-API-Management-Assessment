@@ -1,0 +1,12 @@
+using './main.bicep'
+
+param location = 'westus3'
+param deploymentPhase = 'full'
+param apimDevName = 'apim-apv-dev-wus3-001'
+param apimBv2Name = 'apim-apv-bv2-wus3-001'
+param primaryModelName = 'gpt-5.6-sol'
+param primaryModelVersion = '2026-07-09'
+param secondaryModelName = 'gpt-5.4-mini'
+param secondaryModelVersion = '2026-03-17'
+param embeddingModelName = 'text-embedding-3-small'
+param embeddingModelVersion = '1'

@@ -443,7 +443,9 @@ def evaluate(
     evidence: list[Evidence] = []
     for view, row in zip(views, rows, strict=True):
         state: ControlState = getattr(row, check)
-        if check == "authentication" and view.subscription_required is True:
+        if "Protocol outside HTTP policy coverage" in view.issues:
+            state = "not_applicable"
+        elif check == "authentication" and view.subscription_required is True:
             state = "not_applicable"
         elif check == "authentication" and view.subscription_required is None and state == "absent":
             state = "unknown"
@@ -483,7 +485,7 @@ def evaluate(
     else:
         outcome = "pass"
     if (
-        outcome == "unknown"
+        outcome in {"unknown", "not_applicable"}
         and complete
         and views
         and all("Protocol outside HTTP policy coverage" in view.issues for view in views)

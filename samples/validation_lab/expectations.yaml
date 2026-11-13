@@ -1,0 +1,295 @@
+# Expected rule outcomes for the apim-assess validation lab in westus3.
+# All 55 catalog rules are listed with expected outcomes per APIM instance:
+#   - dev: apim-apv-dev-wus3-001 (Internal VNet Developer SKU, intentional negative profile)
+#   - bv2: apim-apv-bv2-wus3-001 (Public BasicV2 SKU, healthy comparison profile)
+#
+# A string value requires an exact outcome match; a list of strings allows any listed
+# outcome (used only where external Azure telemetry ingestion delay or subscription-level
+# Defender/Policy evaluation timing can legitimately yield unknown vs pass/fail).
+schema_version: "1.0"
+instances:
+  dev:
+    name_suffix: "apim-apv-dev-wus3-001"
+    sku: "Developer"
+    environment: "prod"
+  bv2:
+    name_suffix: "apim-apv-bv2-wus3-001"
+    sku: "BasicV2"
+    environment: "prod"
+
+rules:
+  # --- Reliability (10 rules) ---
+  APIM-REL-001:
+    dev: fail
+    bv2: pass
+    rationale: "Developer SKU in prod fails APIM-REL-001; BasicV2 passes."
+  APIM-REL-002:
+    dev: unsupported
+    bv2: unsupported
+    rationale: "Neither Developer nor BasicV2 supports configurable availability zone redundancy."
+  APIM-REL-003:
+    dev: fail
+    bv2: pass
+    rationale: "Developer has 1 scale unit (fails <2); BasicV2 is provisioned with 2 scale units (passes >=2)."
+  APIM-REL-004:
+    dev: unsupported
+    bv2: fail
+    rationale: "Developer does not support multi-unit autoscale; BasicV2 has no enabled autoscale rules."
+  APIM-REL-006:
+    dev: unsupported
+    bv2: unsupported
+    rationale: "Multi-region gateway deployment is unsupported on Developer and BasicV2."
+  APIM-REL-007:
+    dev: fail
+    bv2: pass
+    rationale: "Developer backends omit circuitBreaker.rules; BasicV2 non-pool backends configure 5xx/429 circuitBreaker.rules."
+  APIM-REL-008:
+    dev: fail
+    bv2:
+      - pass
+      - unknown
+      - not_applicable
+    rationale: "Developer routes an API to a 1-member backend pool (fails <2); BasicV2 routes AI API to a 2-member pool (and non-pool APIs return not_applicable)."
+  APIM-REL-009:
+    dev: fail
+    bv2: pass
+    rationale: "Developer omits <on-error> telemetry/response handling; BasicV2 includes <trace> inside <on-error> via global policy fragment."
+  APIM-REL-010:
+    dev: fail
+    bv2:
+      - pass
+      - unsupported
+    rationale: "Developer uses <retry> without condition or timeout; BasicV2 configures <forward-request timeout='30' /> (and modern MCP/A2A views report unsupported)."
+  APIM-REL-011:
+    dev: unknown
+    bv2: unknown
+    rationale: "Backup/restore DR readiness cannot be verified from ARM read-only state alone."
+
+  # --- Security (24 rules) ---
+  APIM-SEC-001:
+    dev: pass
+    bv2: unsupported
+    rationale: "Developer is Internal VNet injected; BasicV2 does not support classic VNet injection or inbound private endpoints."
+  APIM-SEC-003:
+    dev: pass
+    bv2: not_applicable
+    rationale: "Developer subnet snet-apim-dev has NSG allowing ApiManagement:3443 and AzureLoadBalancer:6390 and denying Internet:80/443."
+  APIM-SEC-004:
+    dev: not_applicable
+    bv2: unknown
+    rationale: "Developer is Internal VNet (not_applicable); BasicV2 has no matched upstream AFD/AppGW route in lab."
+  APIM-SEC-005:
+    dev: not_applicable
+    bv2: unknown
+    rationale: "Developer is Internal VNet (not_applicable); BasicV2 has no matched upstream AFD/AppGW route in lab."
+  APIM-SEC-006:
+    dev: fail
+    bv2:
+      - pass
+      - unknown
+    rationale: "Developer explicitly enables legacy TLS 1.0/1.1 customProperties; BasicV2 disables legacy SSL/TLS."
+  APIM-SEC-007:
+    dev: fail
+    bv2: unsupported
+    rationale: "Developer enables a weak TLS cipher in customProperties; BasicV2 is a v2 tier where classic cipher properties are unsupported."
+  APIM-SEC-008:
+    dev: fail
+    bv2: pass
+    rationale: "Developer exposes an API over both HTTP and HTTPS; BasicV2 enforces HTTPS-only across all REST/MCP/A2A/AI APIs."
+  APIM-SEC-009:
+    dev: fail
+    bv2: not_applicable
+    rationale: "Developer enables direct management API access (tenant/access enabled=true); BasicV2 is not_applicable."
+  APIM-SEC-010:
+    dev: fail
+    bv2:
+      - pass
+      - unknown
+    rationale: "Developer sets minApiVersion=2018-01-01; BasicV2 configures minApiVersion=2021-08-01 in Bicep, though Azure APIM BasicV2 ARM GET returns minApiVersion=null on v2 SKUs."
+  APIM-SEC-011:
+    dev: pass
+    bv2: pass
+    rationale: "Both APIM instances enable SystemAssigned managed identity."
+  APIM-SEC-012:
+    dev: fail
+    bv2: pass
+    rationale: "Developer stores a secret Named Value inline without Key Vault; BasicV2 links all secret Named Values to Key Vault."
+  APIM-SEC-013:
+    dev: pass
+    bv2: pass
+    rationale: "Non-secret Named Values on both instances are stored as plain values rather than Key Vault secrets."
+  APIM-SEC-014:
+    dev:
+      - pass
+      - not_applicable
+    bv2:
+      - pass
+      - not_applicable
+    rationale: "Default gateway hostname uses BuiltIn certificate."
+  APIM-SEC-015:
+    dev: fail
+    bv2: pass
+    rationale: "Developer policy embeds an inline secret literal in set-header; BasicV2 uses Key Vault-backed Named Values and managed identity."
+  APIM-SEC-016:
+    dev: fail
+    bv2: pass
+    rationale: "Developer includes an all-APIs (/apis) subscription; BasicV2 scopes custom subscriptions to specific products."
+  APIM-SEC-017:
+    dev: fail
+    bv2:
+      - pass
+      - not_applicable
+    rationale: "Developer exposes an API with subscriptionRequired=false and no token/cert validation; BasicV2 enforces caller auth on all views."
+  APIM-SEC-018:
+    dev: fail
+    bv2: pass
+    rationale: "Developer omits validate-jwt/validate-azure-ad-token on subscription-required views; BasicV2 enforces validate-azure-ad-token across all APIs."
+  APIM-SEC-019:
+    dev: fail
+    bv2: pass
+    rationale: "Developer omits <base /> in an API policy section; BasicV2 preserves <base /> across all scopes."
+  APIM-SEC-020:
+    dev: fail
+    bv2: pass
+    rationale: "Developer uses wildcard CORS (<origin>*</origin>); BasicV2 restricts CORS to explicit trusted origins."
+  APIM-SEC-021:
+    dev: fail
+    bv2: pass
+    rationale: "Developer disables backend TLS chain/name validation on an HTTPS backend; BasicV2 enables both on all HTTPS backends."
+  APIM-SEC-022:
+    dev: fail
+    bv2: pass
+    rationale: "Developer leaves anonymous portal access / open signup enabled; BasicV2 requires sign-in and disables open signup."
+  APIM-SEC-023:
+    dev: unsupported
+    bv2: unsupported
+    rationale: "Per-API request-tracing exposure uses time-limited debug credentials and cannot be inferred from read-only diagnostics."
+  APIM-SEC-024:
+    dev: fail
+    bv2: pass
+    rationale: "Developer omits outbound header deletion; BasicV2 deletes X-Powered-By and X-AspNet-Version via global outbound fragment."
+  APIM-SEC-025:
+    dev:
+      - pass
+      - fail
+      - unknown
+    bv2:
+      - unsupported
+      - pass
+      - fail
+      - unknown
+    rationale: "Defender for APIs posture depends on subscription-level Microsoft.Security pricing and API security onboarding state."
+
+  # --- Cost Optimization (5 rules) ---
+  APIM-COST-001:
+    dev: not_applicable
+    bv2: unsupported
+    rationale: "Low-capacity classic assessment is not_applicable to Developer and unsupported on BasicV2."
+  APIM-COST-002:
+    dev: not_applicable
+    bv2: not_applicable
+    rationale: "Both instances are evaluated under env=prod profile."
+  APIM-COST-003:
+    dev: unsupported
+    bv2: not_applicable
+    rationale: "Autoscale scale-in rule check is unsupported on Developer and not_applicable when no autoscale setting is active."
+  APIM-COST-004:
+    dev: fail
+    bv2: pass
+    rationale: "Developer omits rate-limit-by-key and limit-concurrency; BasicV2 enforces rate-limit-by-key on all views."
+  APIM-COST-005:
+    dev: fail
+    bv2: unknown
+    rationale: "Developer provisions an empty product (prod-empty) with zero APIs (fails); BasicV2 has no empty products/workspaces and reports unknown for unindexed backend/named-value cross-references."
+
+  # --- Operational Excellence (5 rules) ---
+  APIM-OPS-001:
+    dev: fail
+    bv2: pass
+    rationale: "Developer has no ARM diagnosticSettings resource; BasicV2 ships GatewayLogs and AllMetrics to Log Analytics."
+  APIM-OPS-002:
+    dev: fail
+    bv2: pass
+    rationale: "Developer uses a literal backend URL instead of a backend entity; BasicV2 routes every API via backend entities."
+  APIM-OPS-003:
+    dev: fail
+    bv2: [unknown, not_applicable, pass]
+    rationale: "Developer repeats an identical >=3-node inline policy block across two APIs; BasicV2 reuses shared policy fragments via include-fragment without duplicate inspectable blocks."
+  APIM-OPS-004:
+    dev: fail
+    bv2: pass
+    rationale: "Developer exposes multiple unversioned APIs sharing an exact route identity; BasicV2 uses unique routes and API version sets."
+  APIM-OPS-005:
+    dev:
+      - pass
+      - fail
+      - unknown
+    bv2:
+      - pass
+      - fail
+      - unknown
+    rationale: "Azure Policy compliance depends on asynchronous Microsoft.PolicyInsights evaluation cycles in the sandbox subscription."
+
+  # --- Performance Efficiency (5 rules) ---
+  APIM-PERF-001:
+    dev:
+      - unknown
+      - pass
+      - fail
+    bv2:
+      - unknown
+      - pass
+      - fail
+    rationale: "Freshly deployed lab gateways have <14 days of hourly Capacity metrics, yielding unknown unless historical window is complete."
+  APIM-PERF-002:
+    dev: fail
+    bv2: pass
+    rationale: "Developer sets Application Insights sampling=100% and body bytes=8192 in prod; BasicV2 sets sampling=50%, alwaysLog=allErrors, body bytes=0."
+  APIM-PERF-003:
+    dev: fail
+    bv2:
+      - pass
+      - unsupported
+    rationale: "Developer POST/PUT REST operation lacks validate-content max-size; BasicV2 enforces validate-content size-exceeded-action='prevent' (and modern MCP/A2A views report unsupported)."
+  APIM-PERF-004:
+    dev: unknown
+    bv2:
+      - pass
+      - unsupported
+    rationale: "Developer GET REST operations omit cache-lookup/cache-store (yielding unknown); BasicV2 caches GET operations (and modern MCP/A2A views report unsupported)."
+  APIM-PERF-005:
+    dev:
+      - unknown
+      - pass
+      - fail
+    bv2:
+      - unknown
+      - pass
+      - fail
+    rationale: "Log Analytics KQL backend latency/5xx check returns unknown before ingestion warmup or pass once smoke traffic is indexed."
+
+  # --- AI Gateway & Modern Workloads (6 rules) ---
+  APIM-AIGW-001:
+    dev: fail
+    bv2: pass
+    rationale: "Developer AI API omits token rate limiting; BasicV2 configures llm-token-limit on the Foundry Responses API."
+  APIM-AIGW-002:
+    dev: fail
+    bv2: pass
+    rationale: "Developer AI API uses an inline api-key header without managed identity; BasicV2 uses authentication-managed-identity for https://cognitiveservices.azure.com."
+  APIM-AIGW-003:
+    dev: fail
+    bv2: pass
+    rationale: "Developer AI API routes to a single backend without a pool; BasicV2 routes to a 2-member backend pool across Foundry deployments."
+  APIM-AIGW-004:
+    dev: fail
+    bv2: pass
+    rationale: "Developer AI API omits token metric emission; BasicV2 configures llm-emit-token-metric with an Application Insights logger."
+  APIM-AIGW-005:
+    dev: fail
+    bv2: pass
+    rationale: "Developer GraphQL API omits validate-graphql-request; BasicV2 enforces validate-graphql-request with max-size and max-depth."
+  APIM-AIGW-006:
+    dev: fail
+    bv2: pass
+    rationale: "Developer MCP APIs lack inbound OAuth validation (and REST-backed MCP only has validate-jwt on a backing REST operation); BasicV2 enforces validate-azure-ad-token with tenant/issuer and audience claims on both MCP servers."
