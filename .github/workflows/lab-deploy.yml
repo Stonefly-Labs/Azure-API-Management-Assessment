@@ -1,0 +1,83 @@
+name: Lab Deploy
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: "Deployment phase to run (foundation, full, or all)"
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - all
+          - foundation
+          - full
+      skip_image_build:
+        description: "Skip az acr build if workload image already exists"
+        required: false
+        default: false
+        type: boolean
+  workflow_call:
+    inputs:
+      phase:
+        required: false
+        type: string
+        default: "all"
+      skip_image_build:
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: azure-validation-lab-westus3
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy Validation Lab (westus3)
+    runs-on: ubuntu-latest
+    environment: azure-lab
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install apim-assess and lab dependencies
+        run: python -m pip install -e ".[dev,lab]"
+      - name: Compile Bicep templates (AVM verification)
+        run: |
+          az bicep build --file infra/lab/bootstrap.bicep --stdout > /dev/null
+          az bicep build --file infra/lab/main.bicep --stdout > /dev/null
+          az bicep build-params --file infra/lab/main.bicepparam --stdout > /dev/null
+      - name: Azure Login (Deploy OIDC Identity)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_DEPLOY_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Deploy Validation Lab Infrastructure & Workloads
+        env:
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'westus3' }}
+          AZURE_BOOTSTRAP_RESOURCE_GROUP: ${{ vars.AZURE_BOOTSTRAP_RESOURCE_GROUP || 'rg-apv-bootstrap-wus3-001' }}
+          AZURE_LAB_RESOURCE_GROUP: ${{ vars.AZURE_LAB_RESOURCE_GROUP || 'rg-apv-lab-wus3-001' }}
+          LAB_ENTRA_GATEWAY_APP_ID: ${{ vars.LAB_ENTRA_GATEWAY_APP_ID }}
+          LAB_ENTRA_MCP_APP_ID: ${{ vars.LAB_ENTRA_MCP_APP_ID }}
+          LAB_ENTRA_A2A_APP_ID: ${{ vars.LAB_ENTRA_A2A_APP_ID }}
+          LAB_ENTRA_CLIENT_APP_ID: ${{ vars.LAB_ENTRA_CLIENT_APP_ID }}
+        run: |
+          SKIP_FLAG=""
+          if [ "${{ inputs.skip_image_build }}" = "true" ]; then
+            SKIP_FLAG="--skip-image-build"
+          fi
+          python -m scripts.lab.deploy --phase "${{ inputs.phase || 'all' }}" $SKIP_FLAG
+      - name: Upload sanitized deployment metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: lab-deployment-metadata
+          path: .azure/lab-deployment.json
+          if-no-files-found: warn

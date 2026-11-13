@@ -180,7 +180,10 @@ def _ai(ctx: Context, check: str) -> Evaluation:
     observations: list[tuple[Outcome, Evidence]] = []
     backends_complete = ctx.complete("backends")
     for view in ctx.views:
-        if view.api_type in {"mcp", "a2a"}:
+        if (
+            view.api_type in {"mcp", "a2a"}
+            or "Protocol outside HTTP policy coverage" in view.issues
+        ):
             observations.append(
                 (
                     "not_applicable",

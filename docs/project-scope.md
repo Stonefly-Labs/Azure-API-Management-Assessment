@@ -192,3 +192,9 @@ the MCP incoming-token check. Unavailable policies remain verification gaps.
 - **Container & CLI Packaging:**
   - `pyproject.toml` providing the `apim-assess` CLI entrypoint (`typer` + `rich`).
   - Multi-stage `Dockerfile` allowing zero-install execution via `docker run --rm -v ~/.azure:/root/.azure -v ./output:/output apim-assess assess ...`.
+- **Iteration 10 — Live Azure Validation Lab & CI/CD Lifecycle:**
+  - Standalone Bicep IaC (`infra\lab\`) built with Azure Verified Modules (`br/public:avm/...`) wherever available and containerized Python sample workloads (`samples\validation_lab\`) provisioning a repeatable, paired APIM validation lab in `westus3` (Internal VNet-injected Developer SKU with intentional negative findings and public Basic v2 SKU with healthy comparison configurations).
+
+  - Microsoft Foundry account, project, and model deployments (`gpt-5.6-sol`, `gpt-5.4-mini`, `text-embedding-3-small`) plus Azure Container Apps (REST API with OpenAPI spec, MCP server with Entra JWT auth, A2A agent with Entra JWT auth) and VNet-connected Container Apps Jobs for internal gateway reachability.
+  - Paired APIM sub-resources across both gateways: REST API, REST-backed MCP API, passthrough MCP API, A2A API, Foundry Responses API, backends and backend pools with 429 circuit breakers, Named Values (Key Vault-backed and plain), policy fragments, and policies exercising all 55 catalog rules across deterministic pass/fail/not_applicable/unsupported/unknown outcomes.
+  - Automated Entra ID OIDC federated credential bootstrap (`scripts\lab\bootstrap.py`), scoped teardown with soft-delete tombstone purging (`scripts\lab\destroy.py`), and manual/scheduled GitHub Actions workflows (`lab-deploy.yml`, `lab-validate.yml`, `lab-destroy.yml`, `lab-integration.yml`) that store sanitized assessment artifacts in private Azure Blob Storage without leaking sensitive identifiers in public workflow logs.
