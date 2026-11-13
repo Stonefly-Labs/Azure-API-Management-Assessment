@@ -126,6 +126,7 @@ module security 'modules/security.bicep' = {
     uniqueSuffix: uniqueSuffix
     assessPrincipalId: assessIdentityPrincipalId
     deployPrincipalId: deployIdentityPrincipalId
+    appInsightsInstrumentationKey: observability.outputs.appInsightsInstrumentationKey
     tags: tags
   }
 }
@@ -248,6 +249,7 @@ module apimConfig 'modules/apim-config.bicep' = if (deploymentPhase == 'full') {
     appInsightsResourceId: observability.outputs.appInsightsResourceId
     appInsightsInstrumentationKey: observability.outputs.appInsightsInstrumentationKey
     keyVaultSecretUri: security.outputs.keyVaultBackendSecretUri
+    keyVaultAppInsightsKeySecretUri: security.outputs.keyVaultAppInsightsKeySecretUri
   }
   dependsOn: [
     privateDns

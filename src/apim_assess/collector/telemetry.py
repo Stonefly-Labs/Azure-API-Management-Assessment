@@ -180,6 +180,17 @@ async def collect_metrics(
                     if key in seen:
                         raise AzureReadError("DUPLICATE_METRIC_SERIES")
                     seen.add(key)
+                    cpu_timestamps = (
+                        {
+                            point.timestamp
+                            for existing in results
+                            if existing.name == "CpuPercent_Gateway"
+                            and existing.status == "available"
+                            for point in existing.points
+                        }
+                        if name == "MemoryPercent_Gateway"
+                        else set()
+                    )
                     points = [
                         MetricPoint.model_validate(point.model_dump())
                         for point in series.data
@@ -187,6 +198,12 @@ async def collect_metrics(
                         and any(
                             getattr(point, field.lower()) is not None
                             for field in aggregation.split(",")
+                        )
+                        and not (
+                            cpu_timestamps
+                            and point.timestamp not in cpu_timestamps
+                            and point.average == 100.0
+                            and point.maximum == 100.0
                         )
                     ]
                     if not points:

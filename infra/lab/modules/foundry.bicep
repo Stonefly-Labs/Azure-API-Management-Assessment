@@ -51,7 +51,7 @@ var roleAssignments = [
 
 // Use AVM cognitive-services/account for the Foundry AIServices resource and
 // sequential GlobalStandard model deployments.
-module foundryAccount 'br/public:avm/res/cognitive-services/account:0.9.2' = {
+module foundryAccount 'br/public:avm/res/cognitive-services/account:0.19.1' = {
   name: 'avm-${accountName}'
   params: {
     name: accountName
@@ -62,6 +62,7 @@ module foundryAccount 'br/public:avm/res/cognitive-services/account:0.9.2' = {
     customSubDomainName: accountName
     publicNetworkAccess: 'Enabled'
     disableLocalAuth: false
+    allowProjectManagement: true
     managedIdentities: {
       systemAssigned: true
     }

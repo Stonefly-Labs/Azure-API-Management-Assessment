@@ -41,6 +41,9 @@ param appInsightsInstrumentationKey string
 @description('Key Vault secret URI for the sample backend secret')
 param keyVaultSecretUri string
 
+@description('Key Vault secret URI for the Application Insights instrumentation key')
+param keyVaultAppInsightsKeySecretUri string
+
 var foundryOpenAiEndpoint = 'https://${foundryAccountName}.openai.azure.com/openai'
 var openApiJson = loadTextContent('../openapi/orders-api.openapi.json')
 
@@ -248,11 +251,21 @@ resource devBackendFoundry 'Microsoft.ApiManagement/service/backends@2024-05-01'
   properties: {
     url: foundryOpenAiEndpoint
     protocol: 'http'
+    credentials: {
+      header: {
+        'api-key': [
+          '{{nv-dev-inline-secret}}'
+        ]
+      }
+    }
     tls: {
       validateCertificateChain: true
       validateCertificateName: true
     }
   }
+  dependsOn: [
+    devNamedValueInlineSecret
+  ]
 }
 
 // APIM-REL-008: fail (Backend pool with only 1 member)
@@ -348,9 +361,6 @@ resource devOrdersApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-
   </inbound>
   <backend>
     <base />
-    <retry count="3" interval="1">
-      <forward-request />
-    </retry>
   </backend>
   <outbound>
     <set-header name="x-powered-by" exists-action="delete" />
@@ -382,14 +392,14 @@ resource devOrdersGetOrderPolicy 'Microsoft.ApiManagement/service/apis/operation
   name: 'policy'
   properties: {
     format: 'rawxml'
-    value: '''
+    value: $'''
 <policies>
   <inbound>
     <base />
     <validate-jwt header-name="Authorization" require-signed-tokens="true" require-expiration-time="true">
-      <openid-config url="https://idp.contoso.example/.well-known/openid-configuration" />
+      <openid-config url="${environment().authentication.loginEndpoint}${tenantId}/v2.0/.well-known/openid-configuration" />
       <audiences>
-        <audience>api://orders-dev</audience>
+        <audience>api://${apimGatewayAppClientId}</audience>
       </audiences>
     </validate-jwt>
   </inbound>
@@ -422,49 +432,12 @@ resource devOrdersDupA 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
   properties: {
     displayName: 'orders-dup-a'
     path: 'orders-dup'
-    serviceUrl: restAppUrl
+    type: 'websocket'
+    serviceUrl: replace(restAppUrl, 'https://', 'wss://')
     protocols: [
-      'https'
+      'wss'
     ]
     subscriptionRequired: true
-  }
-}
-
-resource devOrdersDupAOp 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
-  parent: devOrdersDupA
-  name: 'health'
-  properties: {
-    displayName: 'Health'
-    method: 'GET'
-    urlTemplate: '/healthz'
-  }
-}
-
-resource devOrdersDupAPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-05-01' = {
-  parent: devOrdersDupA
-  name: 'policy'
-  properties: {
-    format: 'rawxml'
-    value: $'''
-<policies>
-  <inbound>
-    <base />
-    <set-backend-service base-url="${restAppUrl}" />
-  </inbound>
-  <backend>
-    <base />
-  </backend>
-  <outbound>
-    <base />
-    <set-header name="x-powered-by" exists-action="delete" />
-    <set-header name="x-aspnet-version" exists-action="delete" />
-    <set-header name="server" exists-action="delete" />
-  </outbound>
-  <on-error>
-    <base />
-  </on-error>
-</policies>
-'''
   }
 }
 
@@ -497,17 +470,20 @@ resource devOrdersDupBPolicy 'Microsoft.ApiManagement/service/apis/policies@2024
   name: 'policy'
   properties: {
     format: 'rawxml'
-    value: '''
+    value: $'''
 <policies>
   <inbound>
     <base />
-    <set-backend-service backend-id="backend-rest" />
+    <set-backend-service base-url="${restAppUrl}" />
   </inbound>
   <backend>
     <base />
   </backend>
   <outbound>
     <base />
+    <set-header name="x-powered-by" exists-action="delete" />
+    <set-header name="x-aspnet-version" exists-action="delete" />
+    <set-header name="server" exists-action="delete" />
   </outbound>
   <on-error>
     <base />
@@ -515,9 +491,6 @@ resource devOrdersDupBPolicy 'Microsoft.ApiManagement/service/apis/policies@2024
 </policies>
 '''
   }
-  dependsOn: [
-    devBackendRest
-  ]
 }
 
 // Note: Dev GraphQL API to exercise APIM-AIGW-005 fail (omits validate-graphql-request)
@@ -615,10 +588,8 @@ resource devFoundryAiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-
   <inbound>
     <base />
     <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
-    <set-header name="api-key" exists-action="override">
-      <value>{{nv-dev-inline-secret}}</value>
-    </set-header>
     <set-backend-service backend-id="backend-foundry-primary" />
+    <set-header name="api-key" exists-action="delete" />
   </inbound>
   <backend>
     <base />
@@ -754,6 +725,8 @@ resource devConciergeA2aApi 'Microsoft.ApiManagement/service/apis@2025-09-01-pre
     ]
     subscriptionRequired: false
     #disable-next-line BCP037
+    isAgent: true
+    #disable-next-line BCP037
     backendId: devBackendA2a.name
     #disable-next-line BCP037
     agent: {
@@ -812,7 +785,8 @@ resource devConciergeA2aPolicy 'Microsoft.ApiManagement/service/apis/policies@20
 // 2. BasicV2 APIM Subresources (Healthy Comparison Profile)
 // ============================================================================
 
-// APIM-SEC-022: pass (Developer portal requires sign-in and disables open signup)
+// APIM-SEC-022: pass (Developer portal requires sign-in on portalconfigs/default and configures Entra ID;
+// note: BasicV2 does not support the legacy portalsettings/signup endpoint)
 resource bv2PortalConfig 'Microsoft.ApiManagement/service/portalconfigs@2024-05-01' = {
   parent: apimBv2
   name: 'default'
@@ -830,20 +804,23 @@ resource bv2PortalConfig 'Microsoft.ApiManagement/service/portalconfigs@2024-05-
   }
 }
 
-resource bv2PortalSignup 'Microsoft.ApiManagement/service/portalsettings@2024-05-01' = {
+resource bv2AadIdentityProvider 'Microsoft.ApiManagement/service/identityProviders@2024-05-01' = {
   parent: apimBv2
-  name: 'signup'
+  name: 'aad'
   properties: {
-    enabled: false
-    termsOfService: {
-      enabled: true
-      consentRequired: true
-      text: 'Authorized enterprise users only.'
-    }
+    type: 'aad'
+    clientId: apimGatewayAppClientId
+    clientSecret: appInsightsInstrumentationKey
+    allowedTenants: [
+      tenantId
+    ]
+    authority: split(environment().authentication.loginEndpoint, '/')[2]
+    signinTenant: tenantId
+    clientLibrary: 'MSAL-2'
   }
 }
 
-// APIM-SEC-012: pass (Secret named value backed by Key Vault via SystemAssigned MI)
+// APIM-SEC-012: pass (Secret named values backed by Key Vault via SystemAssigned MI)
 resource bv2NamedValueKvSecret 'Microsoft.ApiManagement/service/namedValues@2024-05-01' = {
   parent: apimBv2
   name: 'nv-bv2-kv-secret'
@@ -852,6 +829,18 @@ resource bv2NamedValueKvSecret 'Microsoft.ApiManagement/service/namedValues@2024
     secret: true
     keyVault: {
       secretIdentifier: keyVaultSecretUri
+    }
+  }
+}
+
+resource bv2NamedValueAppInsightsKey 'Microsoft.ApiManagement/service/namedValues@2024-05-01' = {
+  parent: apimBv2
+  name: 'nv-bv2-appinsights-key'
+  properties: {
+    displayName: 'nv-bv2-appinsights-key'
+    secret: true
+    keyVault: {
+      secretIdentifier: keyVaultAppInsightsKeySecretUri
     }
   }
 }
@@ -867,7 +856,7 @@ resource bv2NamedValueEnv 'Microsoft.ApiManagement/service/namedValues@2024-05-0
   }
 }
 
-// APIM-PERF-002 & APIM-AIGW-004: pass (Application Insights logger with 50% sampling and 0 body bytes)
+// APIM-PERF-002 & APIM-AIGW-004: pass (Application Insights logger referencing Key Vault-backed Named Value so APIM does not auto-create an inline secret Logger-Credentials named value)
 resource bv2AppInsightsLogger 'Microsoft.ApiManagement/service/loggers@2024-05-01' = {
   parent: apimBv2
   name: 'appinsights'
@@ -876,9 +865,12 @@ resource bv2AppInsightsLogger 'Microsoft.ApiManagement/service/loggers@2024-05-0
     description: 'Application Insights logger for BasicV2 APIM'
     resourceId: appInsightsResourceId
     credentials: {
-      instrumentationKey: appInsightsInstrumentationKey
+      instrumentationKey: '{{nv-bv2-appinsights-key}}'
     }
   }
+  dependsOn: [
+    bv2NamedValueAppInsightsKey
+  ]
 }
 
 resource bv2AppInsightsDiagnostic 'Microsoft.ApiManagement/service/diagnostics@2024-05-01' = {
@@ -1249,7 +1241,7 @@ resource bv2GraphqlApi 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
     description: 'Healthy GraphQL API with size and depth validation'
     path: 'graphql'
     type: 'graphql'
-    serviceUrl: '{{nv-bv2-rest-url}}/graphql'
+    serviceUrl: '${restAppUrl}/graphql'
     protocols: [
       'https'
     ]
@@ -1257,9 +1249,6 @@ resource bv2GraphqlApi 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
     apiVersion: 'v1'
     apiVersionSetId: bv2GraphqlVersionSet.id
   }
-  dependsOn: [
-    bv2NamedValueRestUrl
-  ]
 }
 
 resource bv2ProductGraphqlLink 'Microsoft.ApiManagement/service/products/apis@2024-05-01' = {
@@ -1509,10 +1498,13 @@ resource bv2ConciergeA2aApi 'Microsoft.ApiManagement/service/apis@2025-09-01-pre
     description: 'Healthy native A2A agent API secured with Entra OAuth token validation'
     type: 'a2a'
     path: 'concierge-a2a'
+    serviceUrl: a2aAppUrl
     protocols: [
       'https'
     ]
     subscriptionRequired: false
+    #disable-next-line BCP037
+    isAgent: true
     #disable-next-line BCP037
     backendId: bv2BackendA2a.name
     #disable-next-line BCP037
@@ -1521,27 +1513,14 @@ resource bv2ConciergeA2aApi 'Microsoft.ApiManagement/service/apis@2025-09-01-pre
     }
     #disable-next-line BCP089
     a2aProperties: {
-      agentCardBackendUrl: '{{nv-bv2-a2a-url}}/.well-known/agent-card.json'
+      agentCardBackendUrl: '${a2aAppUrl}/.well-known/agent-card.json'
       agentCardPath: '/.well-known/agent-card.json'
     }
     #disable-next-line BCP037
     jsonRpcProperties: {
-      backendUrl: '{{nv-bv2-a2a-url}}'
+      backendUrl: a2aAppUrl
       path: '/'
     }
-  }
-  dependsOn: [
-    bv2NamedValueA2aUrl
-  ]
-}
-
-resource bv2NamedValueA2aUrl 'Microsoft.ApiManagement/service/namedValues@2024-05-01' = {
-  parent: apimBv2
-  name: 'nv-bv2-a2a-url'
-  properties: {
-    displayName: 'nv-bv2-a2a-url'
-    secret: false
-    value: a2aAppUrl
   }
 }
 

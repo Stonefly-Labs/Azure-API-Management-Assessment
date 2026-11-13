@@ -102,8 +102,10 @@ rules:
     rationale: "Developer enables direct management API access (tenant/access enabled=true); BasicV2 is not_applicable."
   APIM-SEC-010:
     dev: fail
-    bv2: pass
-    rationale: "Developer sets minApiVersion=2018-01-01; BasicV2 sets minApiVersion=2021-08-01."
+    bv2:
+      - pass
+      - unknown
+    rationale: "Developer sets minApiVersion=2018-01-01; BasicV2 configures minApiVersion=2021-08-01 in Bicep, though Azure APIM BasicV2 ARM GET returns minApiVersion=null on v2 SKUs."
   APIM-SEC-011:
     dev: pass
     bv2: pass

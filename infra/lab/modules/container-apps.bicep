@@ -336,7 +336,7 @@ module smokeJob 'br/public:avm/res/app/job:0.7.2' = {
           'scripts.lab.run_smoke_in_job'
         ]
         resources: {
-          cpu: json('0.5')
+          cpu: '0.5'
           memory: '1Gi'
         }
         env: [
@@ -417,7 +417,7 @@ module assessJob 'br/public:avm/res/app/job:0.7.2' = {
           'scripts.lab.run_assess_in_job'
         ]
         resources: {
-          cpu: json('0.5')
+          cpu: '0.5'
           memory: '1Gi'
         }
         env: [

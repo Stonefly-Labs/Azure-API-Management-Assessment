@@ -40,7 +40,16 @@ def _az_executable() -> str:
 
 def run_az(args: list[str], *, check: bool = True) -> Any:
     cmd = [_az_executable(), *args, "--output", "json"]
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        check=False,
+    )
     if check and proc.returncode != 0:
         raise RuntimeError(
             f"Azure CLI command failed ({proc.returncode}): {' '.join(args)}\n{proc.stderr.strip()}"
@@ -302,6 +311,13 @@ def main(argv: list[str] | None = None) -> int:
 
     placeholder_image = "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest"
     outputs: dict[str, Any] = {}
+    if args.output_file.exists():
+        try:
+            existing_summary = json.loads(args.output_file.read_text(encoding="utf-8"))
+            if isinstance(existing_summary.get("outputs"), dict):
+                outputs = dict(existing_summary["outputs"])
+        except json.JSONDecodeError:
+            outputs = {}
 
     if args.phase in {"foundation", "all"}:
         print(

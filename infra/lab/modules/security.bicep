@@ -12,6 +12,10 @@ param assessPrincipalId string = ''
 @description('Principal ID of the deploy identity for ACR push/pull and Key Vault RBAC.')
 param deployPrincipalId string = ''
 
+@description('Optional Application Insights instrumentation key stored in Key Vault for APIM logger bindings.')
+@secure()
+param appInsightsInstrumentationKey string = ''
+
 @description('Standard resource tags including MCAPS sandbox exemption.')
 param tags object = {
   SecurityControl: 'Ignore'
@@ -149,6 +153,12 @@ module keyVault 'br/public:avm/res/key-vault/vault:0.9.0' = {
         name: 'ai-gateway-partner-token'
         value: 'kv-backed-ai-gateway-placeholder-value'
       }
+      {
+        name: 'appinsights-instrumentation-key'
+        value: !empty(appInsightsInstrumentationKey)
+          ? appInsightsInstrumentationKey
+          : '00000000-0000-0000-0000-000000000000'
+      }
     ]
   }
 }
@@ -169,3 +179,4 @@ output keyVaultResourceId string = keyVault.outputs.resourceId
 output keyVaultName string = keyVault.outputs.name
 output keyVaultUri string = keyVault.outputs.uri
 output keyVaultBackendSecretUri string = '${keyVault.outputs.uri}secrets/backend-api-shared-secret'
+output keyVaultAppInsightsKeySecretUri string = '${keyVault.outputs.uri}secrets/appinsights-instrumentation-key'
