@@ -2,14 +2,16 @@ FROM python:3.13-slim-bookworm AS build
 WORKDIR /build
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN python -m pip wheel --no-cache-dir --wheel-dir /wheels ".[mcp]"
+RUN --mount=type=secret,id=pip_config,target=/etc/pip.conf \
+    python -m pip wheel --no-cache-dir --wheel-dir /wheels ".[mcp]"
 
 FROM python:3.13-slim-bookworm
 ARG AZURE_CLI_VERSION=2.93.0
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     AZURE_CONFIG_DIR=/home/assessor/.azure
-RUN python -m venv /opt/azure-cli \
+RUN --mount=type=secret,id=pip_config,target=/etc/pip.conf \
+    python -m venv /opt/azure-cli \
     && /opt/azure-cli/bin/pip install --no-cache-dir "azure-cli==${AZURE_CLI_VERSION}" \
     && ln -s /opt/azure-cli/bin/az /usr/local/bin/az
 COPY --from=build /wheels /wheels

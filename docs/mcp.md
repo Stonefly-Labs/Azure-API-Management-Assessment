@@ -31,6 +31,23 @@ Build the companion image (the existing `Dockerfile` remains the lean CLI image)
 
 ```powershell
 docker build --file Dockerfile.mcp --tag apim-assess:mcp .
+```
+
+Docker does not inherit the host's pip or uv feed settings. To use a private feed,
+pass a Linux-compatible pip configuration as an optional BuildKit secret:
+
+```powershell
+docker build --file Dockerfile.mcp --tag apim-assess:mcp `
+  --secret "id=pip_config,src=$env:APPDATA\pip\pip.ini" .
+```
+
+The file is mounted only during package downloads, not copied into image layers.
+Host keyring integrations and host-only certificate paths do not transfer into
+the build. Without the secret, pip uses its normal default index.
+
+Log in separately after building:
+
+```powershell
 docker run --rm -it --entrypoint az `
   --mount "type=volume,source=apim-assess-azure,target=/home/assessor/.azure" `
   apim-assess:mcp login --use-device-code --tenant "<tenant-id>"
@@ -170,8 +187,10 @@ legacy clients, deterministic artifact parity, and worker/path/error behavior.
 Native tool invocation was verified locally in Copilot CLI and Claude Code using
 isolated test configuration on Windows/Python 3.13. A live native APIM assessment
 also completed through the MCP tools, producing snapshot, findings, and HTML
-artifacts. Container client use and container login/cache reuse have not been
-verified locally because Docker's daemon was unavailable.
+artifacts. A local companion-image build using a private pip feed and offline
+stdio analyze/query/report also passed; the build feed configuration was absent
+from the finished non-root image. Container Copilot/Claude sessions and live
+Azure assessment/cache reuse remain pending interactive container sign-in.
 CI builds the companion image and exercises stdio analyze/query/report without
 network or credentials, plus non-root and cache permissions. Real Copilot/Claude
 sessions and authorized live Azure login/cache reuse are separate acceptance
