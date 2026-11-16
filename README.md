@@ -1,6 +1,6 @@
 # apim-assess
 
-Read-only Azure API Management assessment CLI. **Iterations 1-10**: core
+Read-only Azure API Management assessment CLI. **Iterations 1-11**: core
 configuration, Azure Monitor metrics, sanitized sub-resource inventory,
 effective XML policies, 55 deterministic rules, linked networking/governance
 metadata, optional aggregate Log Analytics queries, validated rule
@@ -12,6 +12,10 @@ with inline SVG trend charts, native MCP/A2A inventories, MCP OAuth posture,
 and a repeatable Azure validation lab with paired APIM profiles, Microsoft Foundry
 deployments, Entra-secured Python Container Apps, and automated lifecycle workflows.
 
+Iteration 11 adds an optional [local MCP interface](docs/mcp.md) for Copilot and
+Claude clients, with offline queries, cancellable assessment jobs and a separate
+Azure-CLI-enabled container. Install `".[mcp]"` to use it; the ordinary CLI does
+not require MCP dependencies.
 
 ## Install
 

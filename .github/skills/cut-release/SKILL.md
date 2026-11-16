@@ -140,3 +140,19 @@ delete a tag or release as automatic cleanup.
 
 Return the release URL, version, phase PR, target SHA, and release type.
 Stop without merging any PR or advancing the implementation phase.
+
+## Separately requested MCP assets
+
+Source-only invocations retain the behavior above. Only when the user additionally
+and explicitly requests MCP wheel/container publication, inspect
+`.github\workflows\publish-mcp.yml` and `docs\mcp.md` after source-release
+verification. Require package metadata at `$TargetSha` to match the supplied
+version without its leading `v`. A mismatch requires a separate maintenance
+change and human merge, not a release-time source bump.
+
+Dispatch the manual workflow with the verified tag using `gh workflow run`,
+then verify the run outcome, release checksums/assets and image digest. Preserve
+all existing target/version/human-merge gates. Confirm public package visibility
+and anonymous pull before claiming public GHCR availability. Do not select a new
+version, publish on main pushes, overwrite assets/tags, or treat this as PyPI
+publication. Report partial publication or registry-permission failures explicitly.

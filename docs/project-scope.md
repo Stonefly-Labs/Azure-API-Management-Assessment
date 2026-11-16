@@ -44,6 +44,13 @@ A single execution can evaluate **1 to N APIM instances** across **1 to N Azure 
 
 ## 4. Pipeline Architecture & Execution Stages
 
+Iteration 11 adds an optional local stdio MCP interface to this same pipeline,
+usable from Python or a companion container. This is an agent interface to
+`apim-assess`, distinct from collecting native APIM MCP endpoints. Only explicit
+Azure targets and workspace-contained files are accepted. Deterministic findings,
+coverage and scores remain authoritative; no MCP tool performs remediation or
+model enrichment. See `mcp.md` for tool contracts and authentication.
+
 The CLI supports both decoupled pipeline stages and a single-command workflow:
 
 ```text

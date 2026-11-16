@@ -1,0 +1,133 @@
+name: Publish MCP release assets
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing published release tag, matching package version
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.target.outputs.sha }}
+      version: ${{ steps.target.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          python - <<'PY'
+          import json, os, re, subprocess, tomllib
+          tag = os.environ["TAG"]
+          if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?", tag):
+              raise SystemExit("Invalid release tag")
+          def gh(*args):
+              return json.loads(subprocess.check_output(["gh", *args], text=True))
+          repo = os.environ["GITHUB_REPOSITORY"]
+          release = gh("release", "view", tag, "--repo", repo, "--json", "isDraft,tagName")
+          if release["isDraft"]:
+              raise SystemExit("Publish the approved source release first")
+          sha = subprocess.check_output(["git", "rev-parse", f"refs/tags/{tag}^{{commit}}"], text=True).strip()
+          subprocess.run(["git", "merge-base", "--is-ancestor", sha, "origin/main"], check=True)
+          prs = gh("api", f"repos/{repo}/commits/{sha}/pulls")
+          if not any(p["merged_at"] and p["base"]["ref"] == "main" and p["merge_commit_sha"] == sha for p in prs):
+              raise SystemExit("Target must be a merged phase PR commit")
+          subprocess.run(["git", "checkout", "--detach", sha], check=True)
+          version = tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]
+          if version != tag[1:]:
+              raise SystemExit("Source package version must match release; no automatic bump")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"sha={sha}\nversion={version}\n")
+          PY
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -e ".[dev,mcp]"
+      - run: python -m ruff check . && python -m ruff format --check . && python -m mypy && python -m pytest -q && python -m build
+      - name: Verify container before publication
+        run: |
+          docker build --file Dockerfile.mcp --tag apim-assess:release-check .
+          mkdir -p mcp-output
+          chmod 777 mcp-output
+          python scripts/mcp_smoke.py --workspace mcp-output --image apim-assess:release-check
+      - run: sha256sum dist/* > dist/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-dist
+          path: dist/
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: mcp-release
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+          path: dist/
+      - name: Refuse existing image tags or assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          python - <<'PY'
+          import base64, json, os, subprocess
+          from urllib.error import HTTPError
+          from urllib.request import Request, urlopen
+          tag = os.environ["TAG"]
+          release = json.loads(subprocess.check_output(
+              ["gh", "release", "view", tag, "--repo", os.environ["GITHUB_REPOSITORY"], "--json", "assets"], text=True))
+          if release["assets"]:
+              raise SystemExit("Release already has assets; do not overwrite")
+          basic = base64.b64encode((os.environ["GITHUB_ACTOR"] + ":" + os.environ["GH_TOKEN"]).encode()).decode()
+          request = Request("https://ghcr.io/token?service=ghcr.io&scope=repository:stonefly-labs/apim-assess:pull",
+                            headers={"Authorization": "Basic " + basic})
+          with urlopen(request) as response:
+              token = json.load(response)["token"]
+          request = Request("https://ghcr.io/v2/stonefly-labs/apim-assess/manifests/" + tag + "-mcp",
+                            headers={"Authorization": "Bearer " + token,
+                                     "Accept": "application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json"})
+          try:
+              with urlopen(request):
+                  raise SystemExit("Image tag already exists; do not overwrite")
+          except HTTPError as error:
+              if error.code != 404:
+                  raise
+          PY
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        id: image
+        with:
+          context: .
+          file: Dockerfile.mcp
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/stonefly-labs/apim-assess:${{ inputs.tag }}-mcp
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ needs.verify.outputs.sha }}
+          provenance: true
+          sbom: true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          printf '%s\n' "$DIGEST" > dist/MCP-IMAGE-DIGEST
+          gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY"
