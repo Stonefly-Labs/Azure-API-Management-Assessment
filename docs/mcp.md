@@ -189,8 +189,13 @@ isolated test configuration on Windows/Python 3.13. A live native APIM assessmen
 also completed through the MCP tools, producing snapshot, findings, and HTML
 artifacts. A local companion-image build using a private pip feed and offline
 stdio analyze/query/report also passed; the build feed configuration was absent
-from the finished non-root image. Container Copilot/Claude sessions and live
-Azure assessment/cache reuse remain pending interactive container sign-in.
+from the finished non-root image. On November 16, 2026, both Copilot CLI and
+Claude Code invoked the container's `explain_rule` tool successfully using
+isolated test configuration. After interactive device-code sign-in, a live
+container MCP assessment completed all 55 checks and saved snapshot, findings,
+and HTML artifacts. A separate fresh container repeated the live assessment
+using the same named credential volume without another login; counts matched
+the native run. Both assessment containers exited on client closure.
 CI builds the companion image and exercises stdio analyze/query/report without
 network or credentials, plus non-root and cache permissions. Real Copilot/Claude
 sessions and authorized live Azure login/cache reuse are separate acceptance

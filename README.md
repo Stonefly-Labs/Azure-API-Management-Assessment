@@ -181,11 +181,10 @@ failures separately from unknowns, and generate the report."**
 Or copy the sample snapshot into your workspace and ask:
 **"Analyze snapshot.json and explain its security findings."**
 
-The server never remediates resources or makes model-enrichment calls. Native
-Copilot CLI and Claude Code tool use and a live native APIM assessment have been
-verified, as has offline container tool use over stdio. Live container assessment
-and login-cache reuse still await interactive sign-in;
-Iteration 11 is in [draft PR #15](https://github.com/Stonefly-Labs/Azure-API-Management-Assessment/pull/15).
+The server never remediates resources or makes model-enrichment calls. Copilot CLI
+and Claude Code tool use has been verified natively and through Docker, along
+with live native/container assessments and saved-login reuse in a fresh container.
+Iteration 11 is in [PR #15](https://github.com/Stonefly-Labs/Azure-API-Management-Assessment/pull/15).
 See [MCP setup and behavior](docs/mcp.md) for complete configuration, limits,
 errors, authentication, and client support details.
 
