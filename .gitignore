@@ -12,3 +12,5 @@ output/
 snapshot.json
 findings.json
 apim-assessment-report.html
+.azure/
+.github/copilot/

@@ -460,7 +460,32 @@ instance, not once per tool. No new MCSB mapping is inferred.
 
 ---
 
+### Iteration 10 — Repeatable Azure Validation Lab & Lifecycle Automation
+
+**Goal:** Deliver an end-to-end, repeatable Azure validation lab (`westus3`) with paired APIM instances (Internal VNet Developer + Public Basic v2), Microsoft Foundry model deployments, Entra-authenticated Python Container Apps (REST, MCP, A2A), automated OIDC bootstrap, and GitHub Actions deploy/validate/destroy workflows that exercise and verify all 55 `apim-assess` rules.
+
+1. **Identity & OIDC Bootstrap (`infra\lab\bootstrap.bicep`, `scripts\lab\bootstrap.py`):**
+   - Provision persistent `rg-apv-bootstrap-wus3-001` with user-assigned managed identities (`id-apv-gh-deploy-wus3-001`, `id-apv-gh-assess-wus3-001`), GitHub Actions OIDC federated credentials scoped to `azure-lab`, and least-privilege RBAC on `rg-apv-bootstrap-wus3-001` and `rg-apv-lab-wus3-001`.
+   - Provision or update Microsoft Entra ID application registrations (`app-apv-mcp-api`, `app-apv-a2a-api`, `app-apv-lab-client`) with app roles and service principals for client-credentials JWT acquisition.
+   - Sync non-secret configuration variables to the GitHub `azure-lab` environment.
+2. **Paired APIM, Foundry, and Container Apps Infrastructure (`infra\lab\`, Azure Verified Modules):**
+   - Author Bicep templates using pinned Azure Verified Modules (`br/public:avm/res/...`) wherever available, falling back to direct ARM resources only where AVM does not expose required preview schemas (such as `Microsoft.ApiManagement/service/apis@2025-09-01-preview` for native MCP/A2A and `/tools` or `Microsoft.CognitiveServices/accounts/projects`).
+   - Deploy VNet (`vnet-apv-lab-wus3-001`) with `snet-apim-dev` (NSG satisfying `APIM-SEC-003`), `snet-aca`, and private DNS (`azure-api.net` scoped record for the internal Developer gateway).
+
+   - Deploy Internal VNet `Developer` APIM (`apim-apv-dev-wus3-001`) and public `BasicV2` APIM (`apim-apv-bv2-wus3-001`), Log Analytics, Application Insights, ACR, private Storage Account (`assessment-runs`), and purge-capable Key Vault.
+   - Deploy Microsoft Foundry account (`ais-apv-lab-wus3-001`), project (`proj-apv-lab-wus3-001`), and `GlobalStandard` deployments (`gpt-5.6-sol`, `gpt-5.4-mini`, `text-embedding-3-small`).
+   - Build and deploy Python Container Apps (`samples\validation_lab\`) for the Orders REST API (with OpenAPI 3.0 spec), Streamable HTTP MCP server (with Entra JWT auth), and JSON-RPC A2A agent (with Entra JWT auth), plus VNet-connected smoke and assessment Container Apps Jobs.
+3. **Paired APIM Configuration Profiles (`infra\lab\modules\apim-config-*.bicep`):**
+   - Configure both APIM instances with the Orders REST API, REST-backed MCP API, passthrough MCP API, A2A Agent API, and Foundry Responses API (`/openai/v1/responses`), alongside backends, backend pools, Named Values, and policy fragments.
+   - Apply the intentional negative profile on `apim-apv-dev-wus3-001` and the healthy baseline profile on `apim-apv-bv2-wus3-001` so all 55 catalog rules are deterministically exercised and verified against `samples\validation_lab\expectations.yaml`.
+4. **Validation, Scoped Teardown & Workflows (`scripts\lab\`, `.github\workflows\lab-*.yml`):**
+   - Execute VNet-internal smoke traffic and `apim-assess collect -> analyze -> report` inside Container Apps Jobs, upload sanitized artifacts (`snapshot.json`, `findings.json`, `apim-assessment-report.html`) to private Blob Storage, and assert all 55 rule outcomes per instance without exposing sensitive identifiers in public GitHub logs.
+   - Provide `scripts\lab\destroy.py` and `lab-destroy.yml` to delete all billable lab resources inside `rg-apv-lab-wus3-001` and purge Key Vault, Foundry, and APIM soft-delete tombstones while preserving `rg-apv-bootstrap-wus3-001` for zero-touch redeployment.
+
+---
+
 ## 4. Development & Git / PR Workflow
+
 
 All development on `apim-assess` strictly follows a branch-and-PR workflow with human-gated merges:
 

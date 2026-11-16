@@ -1,0 +1,25 @@
+# Validation lab assessment configuration for apim-assess.
+# Exercises paired Developer (Internal VNet) and BasicV2 (Public) gateways in westus3
+# under production environment posture so prod-gated rules (APIM-REL-001, APIM-REL-006,
+# APIM-SEC-023, APIM-PERF-002) are actively evaluated alongside policy, security,
+# reliability, cost, operational excellence, and AI Gateway rules.
+env: prod
+
+modules:
+  metrics: true
+  networking: true
+  defender_policy: true
+  log_analytics_kql: true
+  afd:
+    enabled: false
+    auto_discover: false
+    resource_ids: []
+  appgw:
+    enabled: false
+    auto_discover: false
+    resource_ids: []
+
+telemetry:
+  lookback_days: 7
+  kql_max_rows: 10
+  kql_timeout_seconds: 30

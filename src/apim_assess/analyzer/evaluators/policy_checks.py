@@ -16,7 +16,23 @@ def _positive(value: str | None) -> bool:
 def _contexts(ctx: Context, check: str) -> Evaluation:
     observations: list[tuple[Outcome, Evidence]] = []
     methods = {item.path: item.metadata.method for item in ctx.resources("operation")}
+    all_outside_http = bool(ctx.views) and all(
+        "Protocol outside HTTP policy coverage" in view.issues for view in ctx.views
+    )
     for view in ctx.views:
+        if "Protocol outside HTTP policy coverage" in view.issues:
+            observations.append(
+                (
+                    "unsupported" if all_outside_http else "not_applicable",
+                    Evidence(
+                        source="effective_policy",
+                        api_path=view.api_path,
+                        detail=f"{view.api_path}; {check}: protocol outside HTTP/SOAP "
+                        "policy coverage.",
+                    ),
+                )
+            )
+            continue
         if view.api_type in {"mcp", "a2a"} and check in {
             "payload_limits",
             "response_cache",
@@ -271,6 +287,18 @@ def pooling(ctx: Context) -> Evaluation:
     }
     observations: list[tuple[Outcome, Evidence]] = []
     for view in ctx.views:
+        if "Protocol outside HTTP policy coverage" in view.issues:
+            observations.append(
+                (
+                    "not_applicable",
+                    Evidence(
+                        source="effective_policy",
+                        detail=f"{view.api_path}; protocol outside HTTP backend pooling coverage.",
+                        api_path=view.api_path,
+                    ),
+                )
+            )
+            continue
         refs = backend_routes(view)
         selected = [backends.get(ref) for ref in refs]
         outcome: Outcome = "not_applicable"
@@ -385,6 +413,8 @@ def repeated_blocks(ctx: Context) -> Evaluation:
     uncertain = False
     seen: set[tuple[str, str]] = set()
     for view in ctx.views:
+        if "Protocol outside HTTP policy coverage" in view.issues:
+            continue
         for section, nodes in view.sections.items():
             local = [
                 node
@@ -445,7 +475,10 @@ def repeated_blocks(ctx: Context) -> Evaluation:
             else []
         ),
         complete=inventory_complete(ctx.instance.inventory)
-        and not any(view.issues for view in ctx.views),
+        and not any(
+            [issue for issue in view.issues if issue != "Protocol outside HTTP policy coverage"]
+            for view in ctx.views
+        ),
         summary=(
             "Only fully inspectable blocks of at least three nodes are compared. "
             "Shared inherited/fragment content and revisions do not establish duplicated "

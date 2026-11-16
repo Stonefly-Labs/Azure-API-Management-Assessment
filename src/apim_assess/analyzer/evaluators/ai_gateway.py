@@ -180,7 +180,10 @@ def _ai(ctx: Context, check: str) -> Evaluation:
     observations: list[tuple[Outcome, Evidence]] = []
     backends_complete = ctx.complete("backends")
     for view in ctx.views:
-        if view.api_type in {"mcp", "a2a"}:
+        if (
+            view.api_type in {"mcp", "a2a"}
+            or "Protocol outside HTTP policy coverage" in view.issues
+        ):
             observations.append(
                 (
                     "not_applicable",
@@ -316,7 +319,11 @@ def graphql(ctx: Context) -> Evaluation:
     for view in resolve(ctx.instance, include_graphql=True):
         api = apis[view.api_path]
         if api.metadata.api_type != "graphql":
-            outcome: Outcome = "unknown" if api.metadata.api_type is None else "not_applicable"
+            outcome: Outcome = (
+                "unknown"
+                if api.metadata.api_type is None and not view.http_gateway_only
+                else "not_applicable"
+            )
         elif view.workspace:
             # The policy reference and gateway support matrix disagree about workspace support.
             outcome = "unsupported"

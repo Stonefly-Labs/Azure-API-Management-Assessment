@@ -553,6 +553,14 @@ class SubresourceCollector:
                 )
             else:
                 entities = await self.listing(path)
+                if kind == "subscription":
+                    entities = [
+                        entity
+                        for entity in entities
+                        if not entity.id.casefold().endswith("/subscriptions/master")
+                    ]
+                    if path in self.inventory.collections:
+                        self.inventory.collections[path].count = len(entities)
             for entity in entities:
                 item = self.project(entity, kind, workspace)
                 if item is None:

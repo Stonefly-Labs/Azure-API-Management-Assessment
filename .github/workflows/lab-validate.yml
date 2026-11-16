@@ -1,0 +1,54 @@
+name: Lab Validate
+on:
+  workflow_dispatch:
+    inputs:
+      storage_account_name:
+        description: "Lab storage account name for downloading assessment artifacts"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      storage_account_name:
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: azure-validation-lab-westus3
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate 55-Rule Lab Matrix (westus3)
+    runs-on: ubuntu-latest
+    environment: azure-lab
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install apim-assess and lab dependencies
+        run: python -m pip install -e ".[dev,lab]"
+      - name: Azure Login (Read-Only Assessment OIDC Identity)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_ASSESS_CLIENT_ID || vars.AZURE_DEPLOY_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Run In-VNet Smoke & Assessment Jobs and Verify 55-Rule Contract
+        env:
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_LAB_RESOURCE_GROUP: ${{ vars.AZURE_LAB_RESOURCE_GROUP || 'rg-apv-lab-wus3-001' }}
+          LAB_STORAGE_ACCOUNT_NAME: ${{ inputs.storage_account_name }}
+        run: |
+          python -m scripts.lab.validate --live --output-dir artifacts/lab-validation
+      - name: Upload sanitized assessment artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apim-assess-lab-artifacts
+          path: artifacts/lab-validation/**
+          if-no-files-found: warn
