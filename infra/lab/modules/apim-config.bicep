@@ -46,6 +46,23 @@ param keyVaultAppInsightsKeySecretUri string
 
 var foundryOpenAiEndpoint = 'https://${foundryAccountName}.openai.azure.com/openai'
 var openApiJson = loadTextContent('../openapi/orders-api.openapi.json')
+var graphqlSchemaSdl = '''
+type Order {
+  id: ID!
+  customer: String!
+  status: String!
+  total: Float!
+}
+
+type Query {
+  order(id: ID!): Order
+  orders(limit: Int = 10): [Order!]!
+}
+
+schema {
+  query: Query
+}
+'''
 
 // ============================================================================
 // Existing APIM Services
@@ -509,6 +526,17 @@ resource devGraphqlApi 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
   }
 }
 
+resource devGraphqlSchema 'Microsoft.ApiManagement/service/apis/schemas@2024-05-01' = {
+  parent: devGraphqlApi
+  name: 'graphql'
+  properties: {
+    contentType: 'application/vnd.ms-azure-apim.graphql.schema'
+    document: {
+      value: graphqlSchemaSdl
+    }
+  }
+}
+
 resource devGraphqlPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-05-01' = {
   parent: devGraphqlApi
   name: 'policy'
@@ -534,6 +562,7 @@ resource devGraphqlPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-05
   }
   dependsOn: [
     devBackendRest
+    devGraphqlSchema
   ]
 }
 
@@ -1256,6 +1285,17 @@ resource bv2ProductGraphqlLink 'Microsoft.ApiManagement/service/products/apis@20
   name: bv2GraphqlApi.name
 }
 
+resource bv2GraphqlSchema 'Microsoft.ApiManagement/service/apis/schemas@2024-05-01' = {
+  parent: bv2GraphqlApi
+  name: 'graphql'
+  properties: {
+    contentType: 'application/vnd.ms-azure-apim.graphql.schema'
+    document: {
+      value: graphqlSchemaSdl
+    }
+  }
+}
+
 resource bv2GraphqlPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-05-01' = {
   parent: bv2GraphqlApi
   name: 'policy'
@@ -1283,6 +1323,7 @@ resource bv2GraphqlPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-05
   dependsOn: [
     bv2BackendRest
     bv2GlobalPolicy
+    bv2GraphqlSchema
   ]
 }
 
