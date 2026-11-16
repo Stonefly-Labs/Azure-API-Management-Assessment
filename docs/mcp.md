@@ -168,9 +168,10 @@ workspace config. No implicit all-subscription targeting occurs.
 Automated acceptance covers SDK in-memory and real stdio transports, current and
 legacy clients, deterministic artifact parity, and worker/path/error behavior.
 Native tool invocation was verified locally in Copilot CLI and Claude Code using
-isolated test configuration on Windows/Python 3.13. Container client use and live
-Azure login/cache reuse have not been verified locally: Docker's daemon was
-unavailable, and no explicit live target was supplied for this iteration.
+isolated test configuration on Windows/Python 3.13. A live native APIM assessment
+also completed through the MCP tools, producing snapshot, findings, and HTML
+artifacts. Container client use and container login/cache reuse have not been
+verified locally because Docker's daemon was unavailable.
 CI builds the companion image and exercises stdio analyze/query/report without
 network or credentials, plus non-root and cache permissions. Real Copilot/Claude
 sessions and authorized live Azure login/cache reuse are separate acceptance
