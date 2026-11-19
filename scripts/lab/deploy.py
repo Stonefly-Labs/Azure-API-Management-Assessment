@@ -437,7 +437,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.phase in {"foundation", "all"}:
         print(
-            f"[lab-deploy] Deploying foundation phase to {args.resource_group} ({args.location})..."
+            f"[lab-deploy] Deploying foundation phase to {args.resource_group} "
+            f"({args.location})...",
+            flush=True,
         )
         outputs = deploy_bicep_phase(
             subscription_id=subscription_id,
@@ -465,7 +467,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.phase in {"full", "all"}:
         if acr_name and not args.skip_image_build:
-            print(f"[lab-deploy] Building and pushing container image {full_image} via ACR...")
+            print(
+                f"[lab-deploy] Building and pushing container image {full_image} via ACR...",
+                flush=True,
+            )
             full_image = build_and_push_acr_image(
                 subscription_id=subscription_id,
                 acr_name=acr_name,
@@ -493,7 +498,7 @@ def main(argv: list[str] | None = None) -> int:
             except RuntimeError as exc:
                 if args.cloudflare_api_token:
                     raise
-                print(f"[lab-deploy] Skipping Key Vault wildcard cert setup: {exc}")
+                print(f"[lab-deploy] Skipping Key Vault wildcard cert setup: {exc}", flush=True)
 
         if wildcard_cert_secret_uri:
             dev_custom_cert_pfx_base64 = generate_short_lived_custom_pfx_base64(
@@ -503,7 +508,7 @@ def main(argv: list[str] | None = None) -> int:
 
         apim_bv2_public_ip = resolve_hostname_ipv4(f"{args.apim_bv2_name}.azure-api.net")
 
-        print(f"[lab-deploy] Deploying full lab topology to {args.resource_group}...")
+        print(f"[lab-deploy] Deploying full lab topology to {args.resource_group}...", flush=True)
         outputs = deploy_bicep_phase(
             subscription_id=subscription_id,
             resource_group=args.resource_group,
@@ -532,7 +537,8 @@ def main(argv: list[str] | None = None) -> int:
             apim_bv2_default_host = f"{args.apim_bv2_name}.azure-api.net"
             print(
                 f"[lab-deploy] Upserting Cloudflare DNS records in {args.custom_domain_zone} "
-                f"(AppGW IP {appgw_public_ip})..."
+                f"(AppGW IP {appgw_public_ip})...",
+                flush=True,
             )
             upsert_lab_dns_records(
                 cloudflare_api_token=args.cloudflare_api_token,
@@ -552,7 +558,7 @@ def main(argv: list[str] | None = None) -> int:
         "outputs": outputs,
     }
     args.output_file.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    print(f"[lab-deploy] Deployment outputs written to {args.output_file}")
+    print(f"[lab-deploy] Deployment outputs written to {args.output_file}", flush=True)
     return 0
 
 

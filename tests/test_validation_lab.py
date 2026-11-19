@@ -1674,3 +1674,22 @@ def test_short_lived_custom_pfx_and_cloudflare_dns_upsert() -> None:
         },
     )
     assert sid == "https://kv-apv-lab-test.vault.azure.net/secrets/wildcard-christopher-house-com"
+
+    from scripts.lab.acme_cloudflare import wait_for_txt_propagation
+
+    doh_Client = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda _req: httpx.Response(
+                200,
+                json={"Answer": [{"data": '"expected-challenge-token"'}]},
+            )
+        )
+    )
+    wait_for_txt_propagation(
+        "_acme-challenge.christopher-house.com",
+        "expected-challenge-token",
+        timeout_seconds=5.0,
+        http_client=doh_Client,
+        sleep_fn=lambda _s: None,
+    )
+    doh_Client.close()

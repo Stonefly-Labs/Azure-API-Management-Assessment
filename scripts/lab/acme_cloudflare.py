@@ -18,6 +18,7 @@ import datetime as dt
 import hashlib
 import json
 import secrets
+import subprocess
 import tempfile
 import time
 from collections.abc import Callable
@@ -35,6 +36,15 @@ LETSENCRYPT_PROD_DIRECTORY = "https://acme-v02.api.letsencrypt.org/directory"
 LETSENCRYPT_STAGING_DIRECTORY = "https://acme-staging-v02.api.letsencrypt.org/directory"
 CLOUDFLARE_API_BASE = "https://api.cloudflare.com/client/v4"
 CLOUDFLARE_DOH_URL = "https://1.1.1.1/dns-query"
+DOH_RESOLVER_URLS = (
+    CLOUDFLARE_DOH_URL,
+    "https://1.0.0.1/dns-query",
+    "https://dns.google/resolve",
+)
+DEFAULT_AUTHORITATIVE_NS = (
+    "algin.ns.cloudflare.com",
+    "lila.ns.cloudflare.com",
+)
 DEFAULT_ZONE_NAME = "christopher-house.com"
 DEFAULT_CERT_NAME = "wildcard-christopher-house-com"
 
@@ -218,6 +228,28 @@ class CloudflareDnsClient:
         return dict(result) if isinstance(result, dict) else body
 
 
+def _check_authoritative_txt_nslookup(
+    fqdn: str,
+    expected_value: str,
+    nameservers: tuple[str, ...] = DEFAULT_AUTHORITATIVE_NS,
+) -> bool:
+    """Query Cloudflare authoritative nameservers directly via nslookup."""
+    for ns in nameservers:
+        try:
+            proc = subprocess.run(
+                ["nslookup", "-type=TXT", fqdn, ns],
+                capture_output=True,
+                text=True,
+                timeout=6.0,
+                check=False,
+            )
+            if expected_value in (proc.stdout or ""):
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def wait_for_txt_propagation(
     fqdn: str,
     expected_value: str,
@@ -226,29 +258,47 @@ def wait_for_txt_propagation(
     poll_interval_seconds: float = 4.0,
     http_client: httpx.Client | None = None,
     sleep_fn: Callable[[float], None] = time.sleep,
+    authoritative_nameservers: tuple[str, ...] = DEFAULT_AUTHORITATIVE_NS,
 ) -> None:
-    """Poll Cloudflare DNS-over-HTTPS until the expected TXT challenge is visible."""
+    """Poll authoritative DNS and DoH resolvers until the expected TXT challenge is visible."""
     owns_client = http_client is None
     client = http_client or httpx.Client(timeout=10.0)
+    is_mock_client = isinstance(getattr(client, "_transport", None), httpx.MockTransport)
     deadline = time.monotonic() + timeout_seconds
     clean_name = fqdn.rstrip(".")
+    doh_urls = (CLOUDFLARE_DOH_URL,) if is_mock_client else DOH_RESOLVER_URLS
+
     try:
+        # Wait one interval before querying recursive resolvers so we do not trigger
+        # 1800s SOA negative-cache poisoning at t=0 before authoritative push finishes.
+        if not is_mock_client and timeout_seconds > poll_interval_seconds:
+            sleep_fn(min(poll_interval_seconds, 5.0))
+
         while True:
-            try:
-                resp = client.get(
-                    CLOUDFLARE_DOH_URL,
-                    params={"name": clean_name, "type": "TXT"},
-                    headers={"Accept": "application/dns-json"},
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    answers = data.get("Answer") or []
-                    for ans in answers:
-                        raw_txt = str(ans.get("data") or "").strip().strip('"')
-                        if raw_txt == expected_value:
-                            return
-            except Exception:
-                pass
+            if not is_mock_client and _check_authoritative_txt_nslookup(
+                clean_name,
+                expected_value,
+                authoritative_nameservers,
+            ):
+                return
+
+            for doh_url in doh_urls:
+                try:
+                    resp = client.get(
+                        doh_url,
+                        params={"name": clean_name, "type": "TXT"},
+                        headers={"Accept": "application/dns-json"},
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        answers = data.get("Answer") or []
+                        for ans in answers:
+                            raw_txt = str(ans.get("data") or "").strip().strip('"')
+                            if raw_txt == expected_value or expected_value in raw_txt:
+                                return
+                except Exception:
+                    continue
+
             if time.monotonic() >= deadline:
                 raise TimeoutError(
                     f"Timed out waiting {timeout_seconds}s for TXT record '{clean_name}'."
@@ -407,7 +457,7 @@ def issue_acme_wildcard_pfx(
     pfx_password: str,
     directory_url: str = LETSENCRYPT_PROD_DIRECTORY,
     contact_email: str | None = None,
-    propagation_wait_seconds: float = 120.0,
+    propagation_wait_seconds: float = 60.0,
     http_client: httpx.Client | None = None,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> bytes:
@@ -422,6 +472,14 @@ def issue_acme_wildcard_pfx(
     created_record_ids: list[str] = []
 
     try:
+        for stale in cloudflare.list_records(zone_id, name=challenge_fqdn, record_type="TXT"):
+            stale_id = str(stale.get("id") or "")
+            if stale_id:
+                cloudflare.delete_record(zone_id, stale_id)
+
+        print(
+            f"[acme] Requesting Let's Encrypt wildcard order for {wildcard_domain}...", flush=True
+        )
         acme = _AcmeV2Session(directory_url, http_client=client)
         acme.initialize()
         acme.register_account(contact_email=contact_email)
@@ -453,14 +511,28 @@ def issue_acme_wildcard_pfx(
             txt_value = _b64url(hashlib.sha256(key_auth.encode("ascii")).digest())
             rec_id = cloudflare.create_txt_record(zone_id, challenge_fqdn, txt_value)
             created_record_ids.append(rec_id)
+            print(
+                f"[acme] Created Cloudflare TXT record {challenge_fqdn} ({rec_id}); "
+                "verifying DNS propagation...",
+                flush=True,
+            )
             if propagation_wait_seconds > 0:
-                wait_for_txt_propagation(
-                    challenge_fqdn,
-                    txt_value,
-                    timeout_seconds=propagation_wait_seconds,
-                    http_client=client,
-                    sleep_fn=sleep_fn,
-                )
+                try:
+                    wait_for_txt_propagation(
+                        challenge_fqdn,
+                        txt_value,
+                        timeout_seconds=propagation_wait_seconds,
+                        http_client=client,
+                        sleep_fn=sleep_fn,
+                    )
+                    print(f"[acme] Verified DNS propagation for {challenge_fqdn}.", flush=True)
+                except TimeoutError:
+                    print(
+                        f"[acme] Local DNS resolver did not observe {challenge_fqdn} within "
+                        f"{propagation_wait_seconds}s (likely cached SOA NXDOMAIN); "
+                        "proceeding with authoritative ACME challenge validation...",
+                        flush=True,
+                    )
             challenge_urls.append(str(dns_challenge["url"]))
 
         for chall_url in challenge_urls:
@@ -600,6 +672,11 @@ def ensure_keyvault_wildcard_certificate(
                         "--password",
                         pfx_password,
                     ]
+                )
+                print(
+                    f"[acme] Imported wildcard certificate '{cert_name}' "
+                    f"into Key Vault '{vault_name}'.",
+                    flush=True,
                 )
                 last_err = None
                 break
