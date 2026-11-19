@@ -67,6 +67,9 @@ param apimBv2Name string = 'apim-apv-bv2-wus3-001'
 @description('Optional resolved public IPv4 of the BasicV2 APIM instance for VNet Private DNS resolution.')
 param apimBv2PublicIp string = ''
 
+@description('Optional resolved public IPv4 of regional Cognitive Services (cognitiveusw3prod.azure-api.net) for VNet Private DNS resolution.')
+param foundryPublicIp string = ''
+
 @description('Optional Key Vault secret URI containing the ACME wildcard certificate for Application Gateway and BasicV2 APIM.')
 param wildcardCertKeyVaultSecretUri string = ''
 
@@ -205,6 +208,7 @@ module privateDns 'modules/private-dns.bicep' = if (deploymentPhase == 'full') {
     devApimPrivateIp: apimDev!.outputs.privateIpAddress
     bv2ApimName: apimBv2Name
     bv2ApimPublicIp: !empty(apimBv2PublicIp) ? apimBv2PublicIp : apimBv2!.outputs.publicIpAddress
+    foundryPublicIp: foundryPublicIp
     tags: tags
   }
 }

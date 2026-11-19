@@ -260,6 +260,7 @@ def deploy_bicep_phase(
     wildcard_cert_secret_uri: str = "",
     dev_custom_cert_pfx_base64: str = "",
     apim_bv2_public_ip: str = "",
+    foundry_public_ip: str = "",
     skip_apim_dev_service_update: bool = False,
 ) -> dict[str, Any]:
     deployment_name = f"apv-lab-{phase}"
@@ -283,6 +284,7 @@ def deploy_bicep_phase(
         "apimDevName": apim_dev_name,
         "apimBv2Name": apim_bv2_name,
         "apimBv2PublicIp": apim_bv2_public_ip,
+        "foundryPublicIp": foundry_public_ip,
         "wildcardCertKeyVaultSecretUri": wildcard_cert_secret_uri,
         "agwBv2HostName": f"agw-bv2.{clean_zone}",
         "agwDevHostName": f"agw-dev.{clean_zone}",
@@ -563,6 +565,9 @@ def main(argv: list[str] | None = None) -> int:
             )
 
         apim_bv2_public_ip = resolve_hostname_ipv4(f"{args.apim_bv2_name}.azure-api.net")
+        foundry_public_ip = (
+            resolve_hostname_ipv4("cognitiveusw3prod.azure-api.net") or "20.125.157.138"
+        )
         apim_bv2_default_host = f"{args.apim_bv2_name}.azure-api.net"
         apim_dev_private_ip = str(outputs.get("apimDevPrivateIp") or "10.240.1.4")
 
@@ -617,6 +622,7 @@ def main(argv: list[str] | None = None) -> int:
             wildcard_cert_secret_uri=wildcard_cert_secret_uri,
             dev_custom_cert_pfx_base64=dev_custom_cert_pfx_base64,
             apim_bv2_public_ip=apim_bv2_public_ip,
+            foundry_public_ip=foundry_public_ip,
             skip_apim_dev_service_update=skip_dev_update,
         )
 

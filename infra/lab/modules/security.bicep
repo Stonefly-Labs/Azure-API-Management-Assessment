@@ -81,6 +81,13 @@ module registry 'br/public:avm/res/container-registry/registry:0.9.3' = {
 }
 
 var storageRoles = concat(
+  [
+    {
+      principalId: workloadIdentity.outputs.principalId
+      principalType: 'ServicePrincipal'
+      roleDefinitionIdOrName: 'Storage Blob Data Contributor'
+    }
+  ],
   !empty(assessPrincipalId)
     ? [
         {
@@ -114,6 +121,10 @@ module storage 'br/public:avm/res/storage/storage-account:0.9.1' = {
     defaultToOAuthAuthentication: true
     minimumTlsVersion: 'TLS1_2'
     publicNetworkAccess: 'Enabled'
+    networkAcls: {
+      defaultAction: 'Allow'
+      bypass: 'AzureServices'
+    }
     supportsHttpsTrafficOnly: true
     blobServices: {
       containerDeleteRetentionPolicyEnabled: false

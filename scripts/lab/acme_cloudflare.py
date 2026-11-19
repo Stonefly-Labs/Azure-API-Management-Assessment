@@ -106,7 +106,7 @@ class CloudflareDnsClient:
             json=json_body,
         )
         try:
-            payload = response.json()
+            payload: dict[str, Any] = response.json()
         except ValueError as exc:
             raise RuntimeError(
                 f"Cloudflare API {method} {path} returned non-JSON ({response.status_code})."
@@ -344,10 +344,10 @@ class _AcmeV2Session:
             return nonce
         new_nonce_url = str(self._directory["newNonce"])
         resp = self._client.head(new_nonce_url)
-        nonce = resp.headers.get("Replay-Nonce")
-        if not nonce:
+        header_nonce = resp.headers.get("Replay-Nonce")
+        if not header_nonce:
             raise RuntimeError("ACME directory did not provide a Replay-Nonce header.")
-        return nonce
+        return str(header_nonce)
 
     def _sign_jws(self, url: str, payload: dict[str, Any] | str | None) -> dict[str, str]:
         protected: dict[str, Any] = {

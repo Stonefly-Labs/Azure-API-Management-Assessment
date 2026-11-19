@@ -44,7 +44,7 @@ param keyVaultSecretUri string
 @description('Key Vault secret URI for the Application Insights instrumentation key')
 param keyVaultAppInsightsKeySecretUri string
 
-var foundryOpenAiEndpoint = 'https://${foundryAccountName}.openai.azure.com/openai'
+var foundryOpenAiEndpoint = 'https://${foundryAccountName}.openai.azure.com'
 var openApiJson = loadTextContent('../openapi/orders-api.openapi.json')
 var graphqlSchemaSdl = '''
 type Order {
@@ -593,7 +593,7 @@ resource devFoundryResponsesOp 'Microsoft.ApiManagement/service/apis/operations@
   properties: {
     displayName: 'Create Response'
     method: 'POST'
-    urlTemplate: '/v1/responses'
+    urlTemplate: '/openai/v1/responses'
   }
 }
 
@@ -603,7 +603,7 @@ resource devFoundryEmbeddingsOp 'Microsoft.ApiManagement/service/apis/operations
   properties: {
     displayName: 'Create Embedding'
     method: 'POST'
-    urlTemplate: '/deployments/text-embedding-3-small/embeddings'
+    urlTemplate: '/openai/deployments/text-embedding-3-small/embeddings'
   }
 }
 
@@ -719,11 +719,11 @@ resource devContainerMcpPolicy 'Microsoft.ApiManagement/service/apis/policies@20
   name: 'policy'
   properties: {
     format: 'rawxml'
-    value: $'''
+    value: '''
 <policies>
   <inbound>
     <base />
-    <authentication-managed-identity resource="api://${mcpBackendAppClientId}" />
+    <set-backend-service backend-id="backend-mcp" />
   </inbound>
   <backend>
     <base />
@@ -789,11 +789,10 @@ resource devConciergeA2aPolicy 'Microsoft.ApiManagement/service/apis/policies@20
   name: 'policy'
   properties: {
     format: 'rawxml'
-    value: $'''
+    value: '''
 <policies>
   <inbound>
     <base />
-    <authentication-managed-identity resource="api://${a2aBackendAppClientId}" />
     <set-backend-service backend-id="backend-a2a" />
   </inbound>
   <backend>
@@ -1113,10 +1112,12 @@ resource bv2FragInboundCommon 'Microsoft.ApiManagement/service/policyFragments@2
     <audiences>
       <audience>api://${apimGatewayAppClientId}</audience>
       <audience>${apimGatewayAppClientId}</audience>
+      <audience>api://${mcpBackendAppClientId}</audience>
+      <audience>${mcpBackendAppClientId}</audience>
+      <audience>api://${a2aBackendAppClientId}</audience>
+      <audience>${a2aBackendAppClientId}</audience>
+      <audience>${smokeClientAppClientId}</audience>
     </audiences>
-    <client-application-ids>
-      <application-id>${smokeClientAppClientId}</application-id>
-    </client-application-ids>
   </validate-azure-ad-token>
   <rate-limit-by-key calls="120" renewal-period="60" counter-key="@(context.Request.IpAddress)" />
 </fragment>
@@ -1179,7 +1180,8 @@ resource bv2OrdersVersionSet 'Microsoft.ApiManagement/service/apiVersionSets@202
   name: 'vs-orders'
   properties: {
     displayName: 'Orders API Version Set'
-    versioningScheme: 'Segment'
+    versioningScheme: 'Header'
+    versionHeaderName: 'X-Api-Version'
   }
 }
 
@@ -1206,7 +1208,7 @@ resource bv2OrdersApi 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
       'https'
     ]
     subscriptionRequired: true
-    apiVersion: 'v1'
+    apiVersion: ''
     apiVersionSetId: bv2OrdersVersionSet.id
   }
   dependsOn: [
@@ -1229,7 +1231,7 @@ resource bv2OrdersApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-
 <policies>
   <inbound>
     <base />
-    <validate-content unspecified-content-type-action="prevent" max-size="65536" size-exceeded-action="prevent" />
+    <validate-content unspecified-content-type-action="ignore" max-size="65536" size-exceeded-action="prevent" />
     <cache-lookup vary-by-developer="false" vary-by-developer-groups="false" downstream-caching-type="none" />
     <set-backend-service backend-id="backend-rest" />
   </inbound>
@@ -1258,7 +1260,8 @@ resource bv2GraphqlVersionSet 'Microsoft.ApiManagement/service/apiVersionSets@20
   name: 'vs-graphql'
   properties: {
     displayName: 'Orders GraphQL Version Set'
-    versioningScheme: 'Segment'
+    versioningScheme: 'Header'
+    versionHeaderName: 'X-Api-Version'
   }
 }
 
@@ -1275,7 +1278,7 @@ resource bv2GraphqlApi 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
       'https'
     ]
     subscriptionRequired: true
-    apiVersion: 'v1'
+    apiVersion: ''
     apiVersionSetId: bv2GraphqlVersionSet.id
   }
 }
@@ -1339,7 +1342,8 @@ resource bv2AiVersionSet 'Microsoft.ApiManagement/service/apiVersionSets@2024-05
   name: 'vs-ai'
   properties: {
     displayName: 'Foundry AI API Version Set'
-    versioningScheme: 'Segment'
+    versioningScheme: 'Header'
+    versionHeaderName: 'X-Api-Version'
   }
 }
 
@@ -1354,7 +1358,7 @@ resource bv2FoundryAiApi 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
       'https'
     ]
     subscriptionRequired: true
-    apiVersion: 'v1'
+    apiVersion: ''
     apiVersionSetId: bv2AiVersionSet.id
   }
 }
@@ -1370,7 +1374,7 @@ resource bv2FoundryResponsesOp 'Microsoft.ApiManagement/service/apis/operations@
   properties: {
     displayName: 'Create Response'
     method: 'POST'
-    urlTemplate: '/v1/responses'
+    urlTemplate: '/openai/v1/responses'
   }
 }
 
@@ -1380,7 +1384,7 @@ resource bv2FoundryEmbeddingsOp 'Microsoft.ApiManagement/service/apis/operations
   properties: {
     displayName: 'Create Embedding'
     method: 'POST'
-    urlTemplate: '/deployments/text-embedding-3-small/embeddings'
+    urlTemplate: '/openai/deployments/text-embedding-3-small/embeddings'
   }
 }
 
@@ -1393,7 +1397,7 @@ resource bv2FoundryAiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-
 <policies>
   <inbound>
     <base />
-    <validate-content unspecified-content-type-action="prevent" max-size="65536" size-exceeded-action="prevent" />
+    <validate-content unspecified-content-type-action="ignore" max-size="65536" size-exceeded-action="prevent" />
     <llm-token-limit counter-key="@(context.Request.IpAddress)" tokens-per-minute="10000" estimate-prompt-tokens="true" />
     <llm-emit-token-metric namespace="foundry-ai">
       <dimension name="API ID" value="@(context.Api.Id)" />

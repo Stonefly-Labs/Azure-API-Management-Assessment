@@ -15,6 +15,12 @@ param bv2ApimName string = ''
 @description('Optional IPv4 address of the public BasicV2 APIM gateway.')
 param bv2ApimPublicIp string = ''
 
+@description('Optional DNS host label under azure-api.net for regional Cognitive Services / Foundry gateway inside the VNet.')
+param foundryDnsName string = 'cognitiveusw3prod'
+
+@description('Optional IPv4 address of the regional Cognitive Services / Foundry gateway under azure-api.net.')
+param foundryPublicIp string = ''
+
 @description('Standard resource tags including MCAPS sandbox exemption.')
 param tags object = {
   SecurityControl: 'Ignore'
@@ -58,6 +64,19 @@ module privateDns 'br/public:avm/res/network/private-dns-zone:0.8.1' = {
               aRecords: [
                 {
                   ipv4Address: bv2ApimPublicIp
+                }
+              ]
+            }
+          ]
+        : [],
+      !empty(foundryDnsName) && !empty(foundryPublicIp)
+        ? [
+            {
+              name: foundryDnsName
+              ttl: 300
+              aRecords: [
+                {
+                  ipv4Address: foundryPublicIp
                 }
               ]
             }

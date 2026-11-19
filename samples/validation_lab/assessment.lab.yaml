@@ -23,3 +23,8 @@ telemetry:
   lookback_days: 7
   kql_max_rows: 10
   kql_timeout_seconds: 30
+
+rules:
+  waivers:
+    - rule_id: APIM-REL-003
+      justification: Developer tier intentionally runs a single scale unit in the validation lab.
