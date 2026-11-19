@@ -18,6 +18,18 @@ param publisherEmail string = 'apim-lab@contoso.com'
 @description('Publisher name for the APIM instance.')
 param publisherName string = 'Contoso Validation Lab'
 
+@description('Optional custom Proxy domain hostname for APIM-SEC-014 (e.g. api-bv2.christopher-house.com).')
+param customDomainHostName string = ''
+
+@description('Optional Key Vault secret URI containing the ACME wildcard certificate for APIM-SEC-014.')
+param customDomainKeyVaultSecretUri string = ''
+
+@description('Optional user-assigned managed identity resource ID with Key Vault Secrets User permission.')
+param certIdentityResourceId string = ''
+
+@description('Optional user-assigned managed identity client ID with Key Vault Secrets User permission.')
+param certIdentityClientId string = ''
+
 @description('Standard resource tags including MCAPS sandbox exemption.')
 param tags object = {
   SecurityControl: 'Ignore'
@@ -48,7 +60,26 @@ module apimBv2 'br/public:avm/res/api-management/service:0.9.1' = {
     enableDeveloperPortal: true
     managedIdentities: {
       systemAssigned: true
+      userAssignedResourceIds: !empty(certIdentityResourceId) ? [certIdentityResourceId] : []
     }
+    hostnameConfigurations: !empty(customDomainHostName) && !empty(customDomainKeyVaultSecretUri)
+      ? [
+          {
+            type: 'Proxy'
+            hostName: '${apimName}.azure-api.net'
+            defaultSslBinding: true
+            negotiateClientCertificate: false
+          }
+          {
+            type: 'Proxy'
+            hostName: customDomainHostName
+            keyVaultId: customDomainKeyVaultSecretUri
+            identityClientId: !empty(certIdentityClientId) ? certIdentityClientId : null
+            defaultSslBinding: false
+            negotiateClientCertificate: false
+          }
+        ]
+      : null
     customProperties: {}
     diagnosticSettings: [
       {
@@ -103,3 +134,4 @@ output apimResourceId string = apimBv2.outputs.resourceId
 output apimName string = apimBv2.outputs.name
 output principalId string = apimBv2.outputs.?systemAssignedMIPrincipalId ?? ''
 output gatewayUrl string = existingApimBv2.properties.?gatewayUrl ?? 'https://${apimName}.azure-api.net'
+output publicIpAddress string = existingApimBv2.properties.?publicIPAddresses[0] ?? ''

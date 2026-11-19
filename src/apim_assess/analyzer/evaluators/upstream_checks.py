@@ -14,7 +14,10 @@ def upstream(ctx: Context, *, lockdown: bool) -> Evaluation:
             "private callers are outside this public upstream check.",
             "publicNetworkAccess",
         )
-    if instance.virtual_network_type == "Internal":
+    has_observed_routes = bool(
+        instance.upstream and (instance.upstream.afd.routes or instance.upstream.appgw.routes)
+    )
+    if instance.virtual_network_type == "Internal" and (lockdown or not has_observed_routes):
         return result(
             "not_applicable",
             "Internal VNet gateway; public upstream/origin bypass check is "

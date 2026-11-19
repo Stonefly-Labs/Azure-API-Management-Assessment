@@ -19,6 +19,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -319,6 +320,24 @@ def _run_az_json(args: list[str]) -> Any:
     return json.loads(proc.stdout) if proc.stdout.strip() else None
 
 
+def _fetch_apim_subscription_key(
+    *,
+    subscription_id: str,
+    resource_group: str,
+    apim_name: str,
+    sub_name: str,
+) -> str:
+    url = (
+        f"https://management.azure.com/subscriptions/{subscription_id}"
+        f"/resourceGroups/{resource_group}/providers/Microsoft.ApiManagement"
+        f"/service/{apim_name}/subscriptions/{sub_name}/listSecrets?api-version=2024-05-01"
+    )
+    res = _run_az_json(["rest", "--method", "post", "--url", url])
+    if isinstance(res, dict):
+        return str(res.get("primaryKey") or "")
+    return ""
+
+
 def trigger_and_wait_container_app_job(
     *,
     subscription_id: str,
@@ -328,45 +347,44 @@ def trigger_and_wait_container_app_job(
     timeout_seconds: int = 900,
 ) -> None:
     """Start a manual Container Apps Job execution and poll until Succeeded."""
+    job_base_url = (
+        f"https://management.azure.com/subscriptions/{subscription_id}"
+        f"/resourceGroups/{resource_group}/providers/Microsoft.App/jobs/{job_name}"
+    )
     job_spec = _run_az_json(
         [
-            "containerapp",
-            "job",
-            "show",
-            "--subscription",
-            subscription_id,
-            "--resource-group",
-            resource_group,
-            "--name",
-            job_name,
+            "rest",
+            "--method",
+            "get",
+            "--url",
+            f"{job_base_url}?api-version=2024-03-01",
         ]
     )
     containers = job_spec.get("properties", {}).get("template", {}).get("containers", [])
     if not containers:
         raise RuntimeError(f"Container Apps Job '{job_name}' has no container template.")
 
-    container = containers[0]
+    container = dict(containers[0])
     existing_env = {
         item["name"]: item.get("value", "") for item in container.get("env", []) if "name" in item
     }
     existing_env.update(env_overrides)
-    env_args = [f"{k}={v}" for k, v in existing_env.items() if v != ""]
+    container["env"] = [{"name": k, "value": v} for k, v in existing_env.items() if v != ""]
 
-    start_res = _run_az_json(
-        [
-            "containerapp",
-            "job",
-            "start",
-            "--subscription",
-            subscription_id,
-            "--resource-group",
-            resource_group,
-            "--name",
-            job_name,
-            "--env-vars",
-            *env_args,
-        ]
-    )
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        body_file = Path(tmp_dir) / f"{job_name}.start.json"
+        body_file.write_text(json.dumps({"containers": [container]}), encoding="utf-8")
+        start_res = _run_az_json(
+            [
+                "rest",
+                "--method",
+                "post",
+                "--url",
+                f"{job_base_url}/start?api-version=2024-03-01",
+                "--body",
+                f"@{body_file}",
+            ]
+        )
     execution_name = str(start_res.get("name") or "")
     print(f"[lab-validate] Started job {job_name} execution {execution_name}")
 
@@ -374,18 +392,11 @@ def trigger_and_wait_container_app_job(
     while time.monotonic() < deadline:
         exec_info = _run_az_json(
             [
-                "containerapp",
-                "job",
-                "execution",
-                "show",
-                "--subscription",
-                subscription_id,
-                "--resource-group",
-                resource_group,
-                "--name",
-                job_name,
-                "--job-execution-name",
-                execution_name,
+                "rest",
+                "--method",
+                "get",
+                "--url",
+                f"{job_base_url}/executions/{execution_name}?api-version=2024-03-01",
             ]
         )
         status = str(exec_info.get("properties", {}).get("status") or "")
@@ -465,6 +476,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=os.environ.get("LAB_ASSESS_JOB_NAME", "caj-apv-assess-wus3-001"),
     )
     parser.add_argument(
+        "--apim-dev-name",
+        default=os.environ.get("LAB_APIM_DEV_NAME", "apim-apv-dev-wus3-001"),
+    )
+    parser.add_argument(
+        "--apim-bv2-name",
+        default=os.environ.get("LAB_APIM_BV2_NAME", "apim-apv-bv2-wus3-001"),
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=REPO_ROOT / "artifacts" / "lab-validation",
@@ -487,11 +506,29 @@ def main(argv: list[str] | None = None) -> int:
         out_dir: Path = args.output_dir / run_id
         out_dir.mkdir(parents=True, exist_ok=True)
 
+        bv2_sub_key = os.environ.get("LAB_BV2_SUBSCRIPTION_KEY") or _fetch_apim_subscription_key(
+            subscription_id=args.subscription_id,
+            resource_group=args.resource_group,
+            apim_name=args.apim_bv2_name,
+            sub_name="sub-bv2-enterprise",
+        )
+        dev_sub_key = os.environ.get("LAB_DEV_SUBSCRIPTION_KEY") or _fetch_apim_subscription_key(
+            subscription_id=args.subscription_id,
+            resource_group=args.resource_group,
+            apim_name=args.apim_dev_name,
+            sub_name="sub-dev-all-apis",
+        )
+        smoke_env = {"LAB_RUN_ID": run_id}
+        if bv2_sub_key:
+            smoke_env["LAB_BV2_SUBSCRIPTION_KEY"] = bv2_sub_key
+        if dev_sub_key:
+            smoke_env["LAB_DEV_SUBSCRIPTION_KEY"] = dev_sub_key
+
         trigger_and_wait_container_app_job(
             subscription_id=args.subscription_id,
             resource_group=args.resource_group,
             job_name=args.smoke_job_name,
-            env_overrides={"LAB_RUN_ID": run_id},
+            env_overrides=smoke_env,
         )
         trigger_and_wait_container_app_job(
             subscription_id=args.subscription_id,

@@ -41,7 +41,7 @@ jobs:
       - name: Run In-VNet Smoke & Assessment Jobs and Verify 55-Rule Contract
         env:
           AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          AZURE_LAB_RESOURCE_GROUP: ${{ vars.AZURE_LAB_RESOURCE_GROUP || 'rg-apv-lab-wus3-001' }}
+          AZURE_LAB_RESOURCE_GROUP: ${{ vars.AZURE_LAB_RESOURCE_GROUP || 'rg-apim-assess-lab' }}
           LAB_STORAGE_ACCOUNT_NAME: ${{ inputs.storage_account_name }}
         run: |
           python -m scripts.lab.validate --live --output-dir artifacts/lab-validation

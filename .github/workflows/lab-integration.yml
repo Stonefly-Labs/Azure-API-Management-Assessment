@@ -2,8 +2,8 @@ name: Lab Integration
 on:
   workflow_dispatch:
     inputs:
-      keep_lab_on_success:
-        description: "Keep disposable lab resources running after validation succeeds"
+      skip_image_build:
+        description: "Skip az acr build if workload image already exists"
         required: false
         default: false
         type: boolean
@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   end-to-end:
-    name: Deploy -> Validate (55 Rules) -> Destroy
+    name: Deploy & Validate Persistent Lab (55 Rules)
     runs-on: ubuntu-latest
     environment: azure-lab
     steps:
@@ -34,6 +34,10 @@ jobs:
           client-id: ${{ vars.AZURE_DEPLOY_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Pre-warm Key Vault & Storage OAuth Tokens
+        run: |
+          az account get-access-token --resource https://vault.azure.net --output none
+          az account get-access-token --resource https://storage.azure.com --output none
       - name: Deploy Validation Lab
         id: deploy
         env:
@@ -41,21 +45,34 @@ jobs:
           AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
           AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'westus3' }}
           AZURE_BOOTSTRAP_RESOURCE_GROUP: ${{ vars.AZURE_BOOTSTRAP_RESOURCE_GROUP || 'rg-apv-bootstrap-wus3-001' }}
-          AZURE_LAB_RESOURCE_GROUP: ${{ vars.AZURE_LAB_RESOURCE_GROUP || 'rg-apv-lab-wus3-001' }}
+          AZURE_LAB_RESOURCE_GROUP: ${{ vars.AZURE_LAB_RESOURCE_GROUP || 'rg-apim-assess-lab' }}
           LAB_ENTRA_GATEWAY_APP_ID: ${{ vars.LAB_ENTRA_GATEWAY_APP_ID }}
           LAB_ENTRA_MCP_APP_ID: ${{ vars.LAB_ENTRA_MCP_APP_ID }}
           LAB_ENTRA_A2A_APP_ID: ${{ vars.LAB_ENTRA_A2A_APP_ID }}
           LAB_ENTRA_CLIENT_APP_ID: ${{ vars.LAB_ENTRA_CLIENT_APP_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          LAB_CUSTOM_DOMAIN_ZONE: ${{ vars.LAB_CUSTOM_DOMAIN_ZONE || 'christopher-house.com' }}
         run: |
-          python -m scripts.lab.deploy --phase all
+          SKIP_FLAG=""
+          if [ "${{ inputs.skip_image_build }}" = "true" ]; then
+            SKIP_FLAG="--skip-image-build"
+          fi
+          python -m scripts.lab.deploy --phase all $SKIP_FLAG
           STORAGE_NAME=$(python -c 'import json; print(json.load(open(".azure/lab-deployment.json"))["outputs"]["storageAccountName"])')
           echo "storage_account_name=$STORAGE_NAME" >> "$GITHUB_OUTPUT"
+      - name: Refresh Azure Login for Validation & Artifact Download
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_DEPLOY_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       - name: Validate Smoke Probes & 55-Rule Expectations Matrix
         env:
           AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          AZURE_LAB_RESOURCE_GROUP: ${{ vars.AZURE_LAB_RESOURCE_GROUP || 'rg-apv-lab-wus3-001' }}
+          AZURE_LAB_RESOURCE_GROUP: ${{ vars.AZURE_LAB_RESOURCE_GROUP || 'rg-apim-assess-lab' }}
           LAB_STORAGE_ACCOUNT_NAME: ${{ steps.deploy.outputs.storage_account_name }}
         run: |
+          az account get-access-token --resource https://storage.azure.com --output none
           python -m scripts.lab.validate --live --output-dir artifacts/lab-validation
       - name: Upload Sanitized Assessment Artifacts
         if: always()
@@ -64,11 +81,3 @@ jobs:
           name: apim-assess-lab-integration-artifacts
           path: artifacts/lab-validation/**
           if-no-files-found: warn
-      - name: Tear Down Disposable Lab and Purge Soft-Delete Tombstones
-        if: always() && inputs.keep_lab_on_success != true
-        env:
-          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          AZURE_LAB_RESOURCE_GROUP: ${{ vars.AZURE_LAB_RESOURCE_GROUP || 'rg-apv-lab-wus3-001' }}
-          AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'westus3' }}
-        run: |
-          python -m scripts.lab.destroy

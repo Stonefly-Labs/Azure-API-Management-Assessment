@@ -43,7 +43,7 @@ jobs:
       - name: Delete Disposable Lab RG and Purge Soft-Delete Tombstones
         env:
           AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          AZURE_LAB_RESOURCE_GROUP: ${{ vars.AZURE_LAB_RESOURCE_GROUP || 'rg-apv-lab-wus3-001' }}
+          AZURE_LAB_RESOURCE_GROUP: ${{ vars.AZURE_LAB_RESOURCE_GROUP || 'rg-apim-assess-lab' }}
           AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'westus3' }}
         run: |
           PURGE_FLAG=""

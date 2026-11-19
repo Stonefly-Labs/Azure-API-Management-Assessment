@@ -647,6 +647,16 @@ def test_application_gateway_effective_listener_policy_overrides_global(modern):
     assert SECRET not in probe.model_dump_json()
     modern.instances[0].upstream = Upstream(appgw=probe, afd=UpstreamProbe(status="disabled"))
     assert finding(modern, "APIM-SEC-004").result.outcome == "fail"
+    modern.instances[0].virtual_network_type = "Internal"
+    assert finding(modern, "APIM-SEC-004").result.outcome == "fail"
+    assert finding(modern, "APIM-SEC-005").result.outcome == "not_applicable"
+    probe.routes[0].waf.prevention = True
+    assert finding(modern, "APIM-SEC-004").result.outcome == "pass"
+    modern.instances[0].upstream = Upstream(
+        appgw=UpstreamProbe(status="complete", routes=[]),
+        afd=UpstreamProbe(status="disabled"),
+    )
+    assert finding(modern, "APIM-SEC-004").result.outcome == "not_applicable"
 
 
 def test_application_gateway_path_policy_overrides_listener_and_default(modern):

@@ -18,6 +18,20 @@ param publisherEmail string = 'apim-lab@contoso.com'
 @description('Publisher name for the APIM instance.')
 param publisherName string = 'Contoso Validation Lab'
 
+@description('Optional custom Proxy domain hostname for APIM-SEC-014 (e.g. api-dev.christopher-house.com).')
+param customDomainHostName string = ''
+
+@description('Optional base64-encoded short-lived custom PFX certificate for APIM-SEC-014 negative posture.')
+@secure()
+param customDomainEncodedCertificate string = ''
+
+@description('Optional password for the short-lived custom PFX certificate.')
+@secure()
+param customDomainCertificatePassword string = ''
+
+@description('When true, skip re-running the AVM APIM service deployment if the instance and custom domain are already converged.')
+param skipServiceUpdate bool = false
+
 @description('Standard resource tags including MCAPS sandbox exemption.')
 param tags object = {
   SecurityControl: 'Ignore'
@@ -48,7 +62,7 @@ module publicIp 'br/public:avm/res/network/public-ip-address:0.9.0' = {
 // - Enables TLS 1.0/1.1 and weak cipher -> fails APIM-SEC-006 & APIM-SEC-007
 // - Sets minApiVersion to 2018-01-01 -> fails APIM-SEC-010
 // - Omits diagnosticSettings -> fails APIM-OPS-001
-module apimDev 'br/public:avm/res/api-management/service:0.9.1' = {
+module apimDev 'br/public:avm/res/api-management/service:0.9.1' = if (!skipServiceUpdate) {
   name: 'avm-${apimName}'
   params: {
     name: apimName
@@ -66,6 +80,24 @@ module apimDev 'br/public:avm/res/api-management/service:0.9.1' = {
     managedIdentities: {
       systemAssigned: true
     }
+    hostnameConfigurations: !empty(customDomainHostName) && !empty(customDomainEncodedCertificate)
+      ? [
+          {
+            type: 'Proxy'
+            hostName: '${apimName}.azure-api.net'
+            defaultSslBinding: true
+            negotiateClientCertificate: false
+          }
+          {
+            type: 'Proxy'
+            hostName: customDomainHostName
+            encodedCertificate: customDomainEncodedCertificate
+            certificatePassword: !empty(customDomainCertificatePassword) ? customDomainCertificatePassword : null
+            defaultSslBinding: false
+            negotiateClientCertificate: false
+          }
+        ]
+      : null
     customProperties: {
       'Microsoft.WindowsAzure.ApiManagement.Gateway.Security.Protocols.Tls10': 'True'
       'Microsoft.WindowsAzure.ApiManagement.Gateway.Security.Protocols.Tls11': 'True'
@@ -84,8 +116,8 @@ resource existingApimDev 'Microsoft.ApiManagement/service@2024-05-01' existing =
   ]
 }
 
-output apimResourceId string = apimDev.outputs.resourceId
-output apimName string = apimDev.outputs.name
-output principalId string = apimDev.outputs.?systemAssignedMIPrincipalId ?? ''
+output apimResourceId string = existingApimDev.id
+output apimName string = existingApimDev.name
+output principalId string = existingApimDev.identity.?principalId ?? ''
 output gatewayUrl string = existingApimDev.properties.?gatewayUrl ?? 'https://${apimName}.azure-api.net'
 output privateIpAddress string = existingApimDev.properties.?privateIPAddresses[0] ?? '10.240.1.5'

@@ -25,6 +25,7 @@ param tags object = {
 
 var oidcIssuer = 'https://token.actions.githubusercontent.com'
 var oidcSubject = 'repo:${githubRepository}:environment:${githubEnvironment}'
+var oidcImmutableSubject = 'repo:Stonefly-Labs@279819657/Azure-API-Management-Assessment@1452795381:environment:${githubEnvironment}'
 var oidcAudiences = [
   'api://AzureADTokenExchange'
 ]
@@ -35,14 +36,33 @@ module deployIdentity 'br/public:avm/res/managed-identity/user-assigned-identity
     name: deployIdentityName
     location: location
     tags: tags
-    federatedIdentityCredentials: [
-      {
-        name: 'fic-gh-azure-lab-deploy'
-        issuer: oidcIssuer
-        subject: oidcSubject
-        audiences: oidcAudiences
-      }
-    ]
+  }
+}
+
+resource existingDeployIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' existing = {
+  name: deployIdentityName
+  dependsOn: [
+    deployIdentity
+  ]
+}
+
+resource deployFic 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31' = {
+  parent: existingDeployIdentity
+  name: 'fic-gh-azure-lab-deploy'
+  properties: {
+    issuer: oidcIssuer
+    subject: oidcSubject
+    audiences: oidcAudiences
+  }
+}
+
+resource deployFicImmutable 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31' = {
+  parent: existingDeployIdentity
+  name: 'fic-gh-azure-lab-deploy-id'
+  properties: {
+    issuer: oidcIssuer
+    subject: oidcImmutableSubject
+    audiences: oidcAudiences
   }
 }
 
@@ -52,14 +72,33 @@ module assessIdentity 'br/public:avm/res/managed-identity/user-assigned-identity
     name: assessIdentityName
     location: location
     tags: tags
-    federatedIdentityCredentials: [
-      {
-        name: 'fic-gh-azure-lab-assess'
-        issuer: oidcIssuer
-        subject: oidcSubject
-        audiences: oidcAudiences
-      }
-    ]
+  }
+}
+
+resource existingAssessIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' existing = {
+  name: assessIdentityName
+  dependsOn: [
+    assessIdentity
+  ]
+}
+
+resource assessFic 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31' = {
+  parent: existingAssessIdentity
+  name: 'fic-gh-azure-lab-assess'
+  properties: {
+    issuer: oidcIssuer
+    subject: oidcSubject
+    audiences: oidcAudiences
+  }
+}
+
+resource assessFicImmutable 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31' = {
+  parent: existingAssessIdentity
+  name: 'fic-gh-azure-lab-assess-id'
+  properties: {
+    issuer: oidcIssuer
+    subject: oidcImmutableSubject
+    audiences: oidcAudiences
   }
 }
 
