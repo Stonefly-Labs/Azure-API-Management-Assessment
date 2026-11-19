@@ -27,6 +27,23 @@ app = typer.Typer(
 console = Console(highlight=False, markup=False)
 
 
+@app.command("mcp")
+def mcp_command(
+    workspace: Annotated[Path, typer.Option("--workspace", exists=True, file_okay=False)],
+) -> None:
+    """Serve local MCP tools over stdio; requires the optional mcp extra."""
+    try:
+        from apim_assess.mcp.server import create_server
+    except ModuleNotFoundError as exc:
+        if exc.name not in {"mcp", "psutil"}:
+            raise
+        Console(stderr=True, markup=False).print(
+            'MCP dependencies missing. Install apim-assess with the "mcp" extra.'
+        )
+        raise typer.Exit(2) from exc
+    create_server(workspace).run(transport="stdio")
+
+
 @contextmanager
 def input_errors() -> Iterator[None]:
     try:

@@ -170,7 +170,7 @@ The hybrid rule engine ships with **45+ rules** mapped across the 5 WAF Pillars 
 > 3. Open a Pull Request to `main`, and
 > 4. **STOP IMMEDIATELY** and wait for human review, testing, and merge before starting the next Iteration.
 
-Rather than building all collectors, all rules, and the report generator horizontally in isolation, execution follows a **vertical-slice (tracer-bullet) approach** across 9 distinct PR-gated phases:
+Rather than building all collectors, all rules, and the report generator horizontally in isolation, execution follows a **vertical-slice (tracer-bullet) approach** across distinct PR-gated phases, including the follow-on MCP iterations below:
 
 ```text
 Phase / PR 1 (`feature/iter-1-steel-thread`)            ──► Live Auth + Basic APIM Config & Metrics + 5 Seed Rules + Minimal HTML Deck        [STOP & PR]
@@ -483,6 +483,57 @@ instance, not once per tool. No new MCSB mapping is inferred.
    - Provide `scripts\lab\destroy.py` and `lab-destroy.yml` to delete all billable lab resources inside `rg-apv-lab-wus3-001` and purge Key Vault, Foundry, and APIM soft-delete tombstones while preserving `rg-apv-bootstrap-wus3-001` for zero-touch redeployment.
 
 ---
+
+### Iteration 11: Local MCP Assessment Interface
+
+**Branch:** `feature/iter-11-local-mcp`. Expose the existing assessment engine
+through an optional Python MCP extra and a local stdio server, not a new engine.
+
+- Tools: collect, analyze, report, assess, job status/result/cancel, paginated
+  findings queries and deterministic catalog explanations.
+- Explicit Azure target/config scope; one configured filesystem workspace.
+  No remediation, arbitrary commands, automatic discovery across ambient
+  subscriptions, model calls, or HTTP listening service.
+- One managed pipeline worker at a time; no queue. Process-scoped job IDs with
+  at most 50 retained records; saved artifacts survive restart. Query pages
+  default to 25 results and cap at 100, with explicit response-size failures.
+- Preserve all 55 rules, waivers, coverage warnings, historical schemas and
+  `collect -> analyze -> report` artifacts. Unknown evidence cannot become pass.
+- Companion non-root image includes isolated Azure CLI and a writable persistent
+  cache. Windows hosts use container-created login state rather than encrypted
+  Windows/WAM cache sharing. Login occurs separately from MCP stdio.
+- Verify native/legacy protocol, worker lifecycle, offline/mock-live parity,
+  base/extra installs, container protocol and client setup. Explicit live Azure
+  and client acceptance are separate from credential-free automated checks.
+- Prepare explicitly dispatched post-merge GitHub wheel/public GHCR publication.
+  No PyPI publication, release-version selection, or publishing during delivery.
+
+### Iteration 12: Durable MCP Run History and Exploration
+
+**Branch:** `feature/iter-12-mcp-history`. After Iteration 11 human merge and an
+explicit start request, add a versioned run index, saved-artifact imports,
+restart history, and deterministic comparison. Distinguish rule/settings/schema
+and coverage changes from actual remediation. Add bounded MCP resource browsing
+and catalog-grounded review prompts. Interrupted jobs remain interrupted; no
+automatic recollection, scheduling or artifact deletion.
+
+### Iteration 13: Authenticated Streamable HTTP
+
+**Branch:** `feature/iter-13-mcp-http`. After Iteration 12 human merge and explicit
+start, expose the same contracts over opt-in authenticated Streamable HTTP.
+Confirm deployment identity and single-user versus multi-user scope first.
+Implement Origin/Host validation, token audience, HTTPS deployment guidance,
+bounded access and isolated jobs/workspaces. Never share an operator's Azure
+cache as ambient delegated access. No hosted SaaS or cloud deployment by default.
+
+### Iteration 14: Verified Protocol Extensions and Broader Clients
+
+**Branch:** `feature/iter-14-mcp-client-capabilities`. After Iteration 13 human
+merge and explicit start, evaluate current supported task/progress/cancellation
+extensions over the existing job engine, retaining polling compatibility.
+Verify Claude Desktop/VS Code and arm64 before promoting support claims.
+Unsupported extensions are postponed, not stubbed. Sampling, remediation,
+scheduling, AI enrichment and PyPI publication remain separately scoped.
 
 ## 4. Development & Git / PR Workflow
 

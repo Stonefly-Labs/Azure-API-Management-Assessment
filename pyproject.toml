@@ -21,6 +21,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+mcp = [
+  "mcp>=2.3,<3",
+  "psutil>=7,<8",
+]
 lab = [
   "a2a-sdk[http-server]>=1.3,<2",
   "agent-framework-core>=1.25,<2",
@@ -31,6 +35,8 @@ lab = [
   "uvicorn>=0.34,<1",
 ]
 dev = [
+  "psutil>=7,<8",
+  "types-psutil>=7,<8",
   "a2a-sdk[http-server]>=1.3,<2",
   "agent-framework-core>=1.25,<2",
   "build>=1.2,<2",

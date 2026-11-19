@@ -1,5 +1,6 @@
 **
 !Dockerfile
+!Dockerfile.mcp
 !pyproject.toml
 !README.md
 !src
