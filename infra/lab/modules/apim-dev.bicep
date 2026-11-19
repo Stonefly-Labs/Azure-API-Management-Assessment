@@ -29,6 +29,9 @@ param customDomainEncodedCertificate string = ''
 @secure()
 param customDomainCertificatePassword string = ''
 
+@description('When true, skip re-running the AVM APIM service deployment if the instance and custom domain are already converged.')
+param skipServiceUpdate bool = false
+
 @description('Standard resource tags including MCAPS sandbox exemption.')
 param tags object = {
   SecurityControl: 'Ignore'
@@ -59,7 +62,7 @@ module publicIp 'br/public:avm/res/network/public-ip-address:0.9.0' = {
 // - Enables TLS 1.0/1.1 and weak cipher -> fails APIM-SEC-006 & APIM-SEC-007
 // - Sets minApiVersion to 2018-01-01 -> fails APIM-SEC-010
 // - Omits diagnosticSettings -> fails APIM-OPS-001
-module apimDev 'br/public:avm/res/api-management/service:0.9.1' = {
+module apimDev 'br/public:avm/res/api-management/service:0.9.1' = if (!skipServiceUpdate) {
   name: 'avm-${apimName}'
   params: {
     name: apimName
@@ -113,8 +116,8 @@ resource existingApimDev 'Microsoft.ApiManagement/service@2024-05-01' existing =
   ]
 }
 
-output apimResourceId string = apimDev.outputs.resourceId
-output apimName string = apimDev.outputs.name
-output principalId string = apimDev.outputs.?systemAssignedMIPrincipalId ?? ''
+output apimResourceId string = existingApimDev.id
+output apimName string = existingApimDev.name
+output principalId string = existingApimDev.identity.?principalId ?? ''
 output gatewayUrl string = existingApimDev.properties.?gatewayUrl ?? 'https://${apimName}.azure-api.net'
 output privateIpAddress string = existingApimDev.properties.?privateIPAddresses[0] ?? '10.240.1.5'

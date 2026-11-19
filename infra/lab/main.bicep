@@ -90,6 +90,9 @@ param devCustomDomainEncodedCertificate string = ''
 @secure()
 param devCustomDomainCertificatePassword string = ''
 
+@description('When true, skip re-running the Developer APIM service deployment if already converged.')
+param skipApimDevServiceUpdate bool = false
+
 @description('Primary Responses model deployment name.')
 param primaryModelName string = 'gpt-5.6-sol'
 
@@ -170,6 +173,7 @@ module apimDev 'modules/apim-dev.bicep' = if (deploymentPhase == 'full') {
     customDomainHostName: devCustomDomainHostName
     customDomainEncodedCertificate: devCustomDomainEncodedCertificate
     customDomainCertificatePassword: devCustomDomainCertificatePassword
+    skipServiceUpdate: skipApimDevServiceUpdate
     tags: tags
   }
 }
@@ -223,9 +227,6 @@ module appGw 'modules/appgw.bicep' = if (deploymentPhase == 'full' && !empty(wil
     workspaceResourceId: observability.outputs.workspaceResourceId
     tags: tags
   }
-  dependsOn: [
-    privateDns
-  ]
 }
 
 // ============================================================================

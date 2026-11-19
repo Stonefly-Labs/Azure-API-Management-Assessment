@@ -18,6 +18,7 @@ Orchestrates:
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import os
 import shutil
@@ -25,6 +26,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -185,6 +187,58 @@ def ensure_caller_kv_cert_officer(
     )
 
 
+def is_apim_dev_custom_domain_converged(
+    subscription_id: str,
+    resource_group: str,
+    apim_dev_name: str,
+    expected_hostname: str,
+) -> bool:
+    """Return True if Developer APIM is Succeeded and already binds the custom domain."""
+    info = run_az(
+        [
+            "apim",
+            "show",
+            "--subscription",
+            subscription_id,
+            "--resource-group",
+            resource_group,
+            "--name",
+            apim_dev_name,
+        ],
+        check=False,
+    )
+    if not isinstance(info, dict):
+        return False
+    if str(info.get("provisioningState") or "") != "Succeeded":
+        return False
+    if str(info.get("virtualNetworkType") or "") != "Internal":
+        return False
+    if not expected_hostname:
+        return True
+    hostnames = info.get("hostnameConfigurations")
+    if not isinstance(hostnames, list):
+        return False
+    for item in hostnames:
+        if not isinstance(item, dict):
+            continue
+        host = str(item.get("hostName") or "").lower()
+        source = str(item.get("certificateSource") or "")
+        if host == expected_hostname.lower() and source == "Custom":
+            cert_obj = item.get("certificate")
+            expiry_raw = cert_obj.get("expiry") if isinstance(cert_obj, dict) else None
+            if isinstance(expiry_raw, str) and expiry_raw:
+                try:
+                    expiry = dt.datetime.fromisoformat(expiry_raw.replace("Z", "+00:00"))
+                    days = (expiry - dt.datetime.now(dt.UTC)).total_seconds() / 86400.0
+                    if 1.0 <= days <= 25.0:
+                        return True
+                except ValueError:
+                    return True
+            else:
+                return True
+    return False
+
+
 def deploy_bicep_phase(
     *,
     subscription_id: str,
@@ -206,6 +260,7 @@ def deploy_bicep_phase(
     wildcard_cert_secret_uri: str = "",
     dev_custom_cert_pfx_base64: str = "",
     apim_bv2_public_ip: str = "",
+    skip_apim_dev_service_update: bool = False,
 ) -> dict[str, Any]:
     deployment_name = f"apv-lab-{phase}"
     clean_zone = custom_domain_zone.strip().lstrip("*.").rstrip(".")
@@ -235,6 +290,7 @@ def deploy_bicep_phase(
         "devCustomDomainHostName": f"api-dev.{clean_zone}" if dev_custom_cert_pfx_base64 else "",
         "devCustomDomainEncodedCertificate": dev_custom_cert_pfx_base64,
         "devCustomDomainCertificatePassword": "",
+        "skipApimDevServiceUpdate": skip_apim_dev_service_update,
     }
     arm_params_doc = {
         "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
@@ -507,6 +563,38 @@ def main(argv: list[str] | None = None) -> int:
             )
 
         apim_bv2_public_ip = resolve_hostname_ipv4(f"{args.apim_bv2_name}.azure-api.net")
+        apim_bv2_default_host = f"{args.apim_bv2_name}.azure-api.net"
+        apim_dev_private_ip = str(outputs.get("apimDevPrivateIp") or "10.240.1.4")
+
+        if args.cloudflare_api_token and wildcard_cert_secret_uri:
+            print(
+                f"[lab-deploy] Pre-seeding APIM custom domain DNS records in "
+                f"{args.custom_domain_zone} before Bicep ownership check...",
+                flush=True,
+            )
+            upsert_lab_dns_records(
+                cloudflare_api_token=args.cloudflare_api_token,
+                zone_name=args.custom_domain_zone,
+                appgw_public_ip=str(outputs.get("appGwPublicIpAddress") or ""),
+                apim_bv2_default_hostname=apim_bv2_default_host,
+                apim_dev_private_ip=apim_dev_private_ip,
+            )
+            time.sleep(10.0)
+
+        clean_zone = args.custom_domain_zone.strip().lstrip("*.").rstrip(".")
+        expected_dev_host = f"api-dev.{clean_zone}" if dev_custom_cert_pfx_base64 else ""
+        skip_dev_update = is_apim_dev_custom_domain_converged(
+            subscription_id=subscription_id,
+            resource_group=args.resource_group,
+            apim_dev_name=args.apim_dev_name,
+            expected_hostname=expected_dev_host,
+        )
+        if skip_dev_update:
+            print(
+                f"[lab-deploy] {args.apim_dev_name} already converged with {expected_dev_host}; "
+                "skipping 15-min stv2 service update.",
+                flush=True,
+            )
 
         print(f"[lab-deploy] Deploying full lab topology to {args.resource_group}...", flush=True)
         outputs = deploy_bicep_phase(
@@ -529,12 +617,12 @@ def main(argv: list[str] | None = None) -> int:
             wildcard_cert_secret_uri=wildcard_cert_secret_uri,
             dev_custom_cert_pfx_base64=dev_custom_cert_pfx_base64,
             apim_bv2_public_ip=apim_bv2_public_ip,
+            skip_apim_dev_service_update=skip_dev_update,
         )
 
         appgw_public_ip = str(outputs.get("appGwPublicIpAddress") or "")
         if args.cloudflare_api_token and appgw_public_ip:
-            apim_dev_private_ip = str(outputs.get("apimDevPrivateIp") or "10.240.1.4")
-            apim_bv2_default_host = f"{args.apim_bv2_name}.azure-api.net"
+            apim_dev_private_ip = str(outputs.get("apimDevPrivateIp") or apim_dev_private_ip)
             print(
                 f"[lab-deploy] Upserting Cloudflare DNS records in {args.custom_domain_zone} "
                 f"(AppGW IP {appgw_public_ip})...",
