@@ -34,6 +34,10 @@ jobs:
           client-id: ${{ vars.AZURE_DEPLOY_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Pre-warm Key Vault & Storage OAuth Tokens
+        run: |
+          az account get-access-token --resource https://vault.azure.net --output none
+          az account get-access-token --resource https://storage.azure.com --output none
       - name: Deploy Validation Lab
         id: deploy
         env:
@@ -56,12 +60,19 @@ jobs:
           python -m scripts.lab.deploy --phase all $SKIP_FLAG
           STORAGE_NAME=$(python -c 'import json; print(json.load(open(".azure/lab-deployment.json"))["outputs"]["storageAccountName"])')
           echo "storage_account_name=$STORAGE_NAME" >> "$GITHUB_OUTPUT"
+      - name: Refresh Azure Login for Validation & Artifact Download
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_DEPLOY_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       - name: Validate Smoke Probes & 55-Rule Expectations Matrix
         env:
           AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           AZURE_LAB_RESOURCE_GROUP: ${{ vars.AZURE_LAB_RESOURCE_GROUP || 'rg-apim-assess-lab' }}
           LAB_STORAGE_ACCOUNT_NAME: ${{ steps.deploy.outputs.storage_account_name }}
         run: |
+          az account get-access-token --resource https://storage.azure.com --output none
           python -m scripts.lab.validate --live --output-dir artifacts/lab-validation
       - name: Upload Sanitized Assessment Artifacts
         if: always()
