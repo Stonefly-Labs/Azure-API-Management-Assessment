@@ -50,10 +50,10 @@ def validate_destroy_scope(resource_group: str) -> None:
         raise ValueError(
             f"Refusing to delete protected bootstrap resource group '{resource_group}'."
         )
-    if not resource_group.startswith("rg-apv-lab-"):
+    if resource_group != "rg-apim-assess-lab" and not resource_group.startswith("rg-apv-lab-"):
         raise ValueError(
             f"Refusing to delete resource group '{resource_group}' "
-            "outside the 'rg-apv-lab-*' prefix."
+            "outside the 'rg-apim-assess-lab' / 'rg-apv-lab-*' scope."
         )
 
 

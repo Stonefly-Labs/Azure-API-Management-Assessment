@@ -75,13 +75,13 @@ rules:
     bv2: not_applicable
     rationale: "Developer subnet snet-apim-dev has NSG allowing ApiManagement:3443 and AzureLoadBalancer:6390 and denying Internet:80/443."
   APIM-SEC-004:
-    dev: not_applicable
-    bv2: unknown
-    rationale: "Developer is Internal VNet (not_applicable); BasicV2 has no matched upstream AFD/AppGW route in lab."
+    dev: fail
+    bv2: pass
+    rationale: "Application Gateway WAF_v2 routes to both instances: Developer listener uses a Detection-mode WAF policy (fails APIM-SEC-004); BasicV2 listener uses an Enabled Prevention-mode OWASP 3.2 WAF policy (passes APIM-SEC-004)."
   APIM-SEC-005:
     dev: not_applicable
     bv2: unknown
-    rationale: "Developer is Internal VNet (not_applicable); BasicV2 has no matched upstream AFD/AppGW route in lab."
+    rationale: "Developer is Internal VNet (not_applicable; subnet NSG enforces VNet lockdown); BasicV2 does not support VNet/NSG origin lockdown."
   APIM-SEC-006:
     dev: fail
     bv2:
@@ -119,13 +119,9 @@ rules:
     bv2: pass
     rationale: "Non-secret Named Values on both instances are stored as plain values rather than Key Vault secrets."
   APIM-SEC-014:
-    dev:
-      - pass
-      - not_applicable
-    bv2:
-      - pass
-      - not_applicable
-    rationale: "Default gateway hostname uses BuiltIn certificate."
+    dev: fail
+    bv2: pass
+    rationale: "Developer binds custom Proxy domain api-dev.christopher-house.com using an inline uploaded short-lived (14-day) certificate (fails APIM-SEC-014); BasicV2 binds api-bv2.christopher-house.com using a Key Vault-backed Let's Encrypt ACME wildcard certificate (passes APIM-SEC-014)."
   APIM-SEC-015:
     dev: fail
     bv2: pass

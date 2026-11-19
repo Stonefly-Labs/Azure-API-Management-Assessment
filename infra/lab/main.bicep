@@ -64,6 +64,32 @@ param apimDevName string = 'apim-apv-dev-wus3-001'
 @description('Name of the Public BasicV2 APIM instance.')
 param apimBv2Name string = 'apim-apv-bv2-wus3-001'
 
+@description('Optional resolved public IPv4 of the BasicV2 APIM instance for VNet Private DNS resolution.')
+param apimBv2PublicIp string = ''
+
+@description('Optional Key Vault secret URI containing the ACME wildcard certificate for Application Gateway and BasicV2 APIM.')
+param wildcardCertKeyVaultSecretUri string = ''
+
+@description('Public hostname for the BasicV2 APIM listener on Application Gateway.')
+param agwBv2HostName string = 'agw-bv2.christopher-house.com'
+
+@description('Public hostname for the Developer APIM listener on Application Gateway.')
+param agwDevHostName string = 'agw-dev.christopher-house.com'
+
+@description('Optional custom Proxy domain hostname for BasicV2 APIM (APIM-SEC-014 pass).')
+param bv2CustomDomainHostName string = 'api-bv2.christopher-house.com'
+
+@description('Optional custom Proxy domain hostname for Developer APIM (APIM-SEC-014 fail).')
+param devCustomDomainHostName string = 'api-dev.christopher-house.com'
+
+@description('Optional base64-encoded short-lived custom PFX certificate for Developer APIM (APIM-SEC-014 fail).')
+@secure()
+param devCustomDomainEncodedCertificate string = ''
+
+@description('Optional password for the short-lived custom PFX certificate on Developer APIM.')
+@secure()
+param devCustomDomainCertificatePassword string = ''
+
 @description('Primary Responses model deployment name.')
 param primaryModelName string = 'gpt-5.6-sol'
 
@@ -141,6 +167,9 @@ module apimDev 'modules/apim-dev.bicep' = if (deploymentPhase == 'full') {
     location: location
     apimName: apimDevName
     subnetResourceId: network.outputs.apimSubnetResourceId
+    customDomainHostName: devCustomDomainHostName
+    customDomainEncodedCertificate: devCustomDomainEncodedCertificate
+    customDomainCertificatePassword: devCustomDomainCertificatePassword
     tags: tags
   }
 }
@@ -152,6 +181,10 @@ module apimBv2 'modules/apim-bv2.bicep' = if (deploymentPhase == 'full') {
     apimName: apimBv2Name
     workspaceResourceId: observability.outputs.workspaceResourceId
     keyVaultName: security.outputs.keyVaultName
+    customDomainHostName: bv2CustomDomainHostName
+    customDomainKeyVaultSecretUri: wildcardCertKeyVaultSecretUri
+    certIdentityResourceId: security.outputs.appGwIdentityResourceId
+    certIdentityClientId: security.outputs.appGwIdentityClientId
     tags: tags
   }
 }
@@ -166,8 +199,33 @@ module privateDns 'modules/private-dns.bicep' = if (deploymentPhase == 'full') {
     vnetResourceId: network.outputs.vnetResourceId
     devApimName: apimDevName
     devApimPrivateIp: apimDev!.outputs.privateIpAddress
+    bv2ApimName: apimBv2Name
+    bv2ApimPublicIp: !empty(apimBv2PublicIp) ? apimBv2PublicIp : apimBv2!.outputs.publicIpAddress
     tags: tags
   }
+}
+
+// ============================================================================
+// 5b. Application Gateway WAF_v2 Ingress (AVM Application Gateway + WAF Policies)
+// ============================================================================
+
+module appGw 'modules/appgw.bicep' = if (deploymentPhase == 'full' && !empty(wildcardCertKeyVaultSecretUri)) {
+  name: 'lab-appgw'
+  params: {
+    location: location
+    appGwSubnetResourceId: network.outputs.appGwSubnetResourceId
+    appGwIdentityResourceId: security.outputs.appGwIdentityResourceId
+    wildcardCertKeyVaultSecretUri: wildcardCertKeyVaultSecretUri
+    agwBv2HostName: agwBv2HostName
+    agwDevHostName: agwDevHostName
+    apimBv2Name: apimBv2Name
+    apimDevName: apimDevName
+    workspaceResourceId: observability.outputs.workspaceResourceId
+    tags: tags
+  }
+  dependsOn: [
+    privateDns
+  ]
 }
 
 // ============================================================================
@@ -273,6 +331,9 @@ output apimDevName string = apimDevName
 output apimBv2Name string = apimBv2Name
 output apimDevGatewayUrl string = deploymentPhase == 'full' ? apimDev!.outputs.gatewayUrl : 'https://${apimDevName}.azure-api.net'
 output apimBv2GatewayUrl string = deploymentPhase == 'full' ? apimBv2!.outputs.gatewayUrl : 'https://${apimBv2Name}.azure-api.net'
+output apimDevPrivateIp string = deploymentPhase == 'full' ? apimDev!.outputs.privateIpAddress : ''
+output appGwName string = deploymentPhase == 'full' && !empty(wildcardCertKeyVaultSecretUri) ? appGw!.outputs.appGwName : 'agw-apv-lab-wus3-001'
+output appGwPublicIpAddress string = deploymentPhase == 'full' && !empty(wildcardCertKeyVaultSecretUri) ? appGw!.outputs.appGwPublicIpAddress : ''
 output restAppUrl string = deploymentPhase == 'full' ? containerApps!.outputs.restAppUrl : ''
 output mcpAppUrl string = deploymentPhase == 'full' ? containerApps!.outputs.mcpAppUrl : ''
 output a2aAppUrl string = deploymentPhase == 'full' ? containerApps!.outputs.a2aAppUrl : ''

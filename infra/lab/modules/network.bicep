@@ -12,6 +12,9 @@ param apimNsgName string = 'nsg-apv-apim-dev-wus3-001'
 @description('Name of the NSG attached to the Container Apps subnet.')
 param acaNsgName string = 'nsg-apv-aca-wus3-001'
 
+@description('Name of the NSG attached to the Application Gateway WAF_v2 subnet.')
+param appGwNsgName string = 'nsg-apv-appgw-wus3-001'
+
 @description('Standard resource tags including MCAPS sandbox exemption.')
 param tags object = {
   SecurityControl: 'Ignore'
@@ -165,6 +168,59 @@ module acaNsg 'br/public:avm/res/network/network-security-group:0.5.4' = {
   }
 }
 
+module appGwNsg 'br/public:avm/res/network/network-security-group:0.5.4' = {
+  name: 'avm-${appGwNsgName}'
+  params: {
+    name: appGwNsgName
+    location: location
+    tags: tags
+    securityRules: [
+      {
+        name: 'Allow-GatewayManager-Inbound'
+        properties: {
+          priority: 100
+          direction: 'Inbound'
+          access: 'Allow'
+          protocol: 'Tcp'
+          sourceAddressPrefix: 'GatewayManager'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '65200-65535'
+          description: 'Allow Azure Application Gateway v2 control plane traffic.'
+        }
+      }
+      {
+        name: 'Allow-AzureLoadBalancer-Inbound'
+        properties: {
+          priority: 110
+          direction: 'Inbound'
+          access: 'Allow'
+          protocol: '*'
+          sourceAddressPrefix: 'AzureLoadBalancer'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '*'
+          description: 'Allow Azure Load Balancer health probes to Application Gateway.'
+        }
+      }
+      {
+        name: 'Allow-Https-Inbound'
+        properties: {
+          priority: 120
+          direction: 'Inbound'
+          access: 'Allow'
+          protocol: 'Tcp'
+          sourceAddressPrefix: 'Internet'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '443'
+          description: 'Allow inbound HTTPS client traffic to Application Gateway listeners.'
+        }
+      }
+    ]
+  }
+}
+
 module vnet 'br/public:avm/res/network/virtual-network:0.9.0' = {
   name: 'avm-${vnetName}'
   params: {
@@ -192,6 +248,14 @@ module vnet 'br/public:avm/res/network/virtual-network:0.9.0' = {
         networkSecurityGroupResourceId: acaNsg.outputs.resourceId
         delegation: 'Microsoft.App/environments'
       }
+      {
+        name: 'snet-appgw'
+        addressPrefix: '10.240.3.0/24'
+        networkSecurityGroupResourceId: appGwNsg.outputs.resourceId
+        serviceEndpoints: [
+          'Microsoft.KeyVault'
+        ]
+      }
     ]
   }
 }
@@ -200,4 +264,5 @@ output vnetResourceId string = vnet.outputs.resourceId
 output vnetName string = vnet.outputs.name
 output apimSubnetResourceId string = vnet.outputs.subnetResourceIds[0]
 output acaSubnetResourceId string = vnet.outputs.subnetResourceIds[1]
+output appGwSubnetResourceId string = vnet.outputs.subnetResourceIds[2]
 output apimNsgResourceId string = apimNsg.outputs.resourceId

@@ -9,6 +9,12 @@ param devApimName string
 @description('Private IPv4 address of the internal Developer APIM gateway.')
 param devApimPrivateIp string
 
+@description('Optional name of the public BasicV2 APIM instance to resolve inside VNet.')
+param bv2ApimName string = ''
+
+@description('Optional IPv4 address of the public BasicV2 APIM gateway.')
+param bv2ApimPublicIp string = ''
+
 @description('Standard resource tags including MCAPS sandbox exemption.')
 param tags object = {
   SecurityControl: 'Ignore'
@@ -32,17 +38,32 @@ module privateDns 'br/public:avm/res/network/private-dns-zone:0.8.1' = {
         registrationEnabled: false
       }
     ]
-    a: [
-      {
-        name: devApimName
-        ttl: 300
-        aRecords: [
-          {
-            ipv4Address: devApimPrivateIp
-          }
-        ]
-      }
-    ]
+    a: concat(
+      [
+        {
+          name: devApimName
+          ttl: 300
+          aRecords: [
+            {
+              ipv4Address: devApimPrivateIp
+            }
+          ]
+        }
+      ],
+      !empty(bv2ApimName) && !empty(bv2ApimPublicIp)
+        ? [
+            {
+              name: bv2ApimName
+              ttl: 300
+              aRecords: [
+                {
+                  ipv4Address: bv2ApimPublicIp
+                }
+              ]
+            }
+          ]
+        : []
+    )
   }
 }
 

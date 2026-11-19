@@ -28,11 +28,21 @@ var acrName = 'acrapvlab${uniqueSuffix}'
 var storageName = 'stapvlab${uniqueSuffix}'
 var keyVaultName = 'kv-apv-lab-${uniqueSuffix}'
 var workloadIdentityName = 'id-apv-workload-wus3-001'
+var appGwIdentityName = 'id-apv-appgw-wus3-001'
 
 module workloadIdentity 'br/public:avm/res/managed-identity/user-assigned-identity:0.5.0' = {
   name: 'avm-${workloadIdentityName}'
   params: {
     name: workloadIdentityName
+    location: location
+    tags: tags
+  }
+}
+
+module appGwIdentity 'br/public:avm/res/managed-identity/user-assigned-identity:0.5.0' = {
+  name: 'avm-${appGwIdentityName}'
+  params: {
+    name: appGwIdentityName
     location: location
     tags: tags
   }
@@ -119,15 +129,34 @@ module storage 'br/public:avm/res/storage/storage-account:0.9.1' = {
   }
 }
 
-var kvRoles = !empty(deployPrincipalId)
-  ? [
-      {
-        principalId: deployPrincipalId
-        principalType: 'ServicePrincipal'
-        roleDefinitionIdOrName: 'Key Vault Secrets Officer'
-      }
-    ]
-  : []
+var kvRoles = concat(
+  [
+    {
+      principalId: appGwIdentity.outputs.principalId
+      principalType: 'ServicePrincipal'
+      roleDefinitionIdOrName: 'Key Vault Secrets User'
+    }
+    {
+      principalId: appGwIdentity.outputs.principalId
+      principalType: 'ServicePrincipal'
+      roleDefinitionIdOrName: 'Key Vault Certificate User'
+    }
+  ],
+  !empty(deployPrincipalId)
+    ? [
+        {
+          principalId: deployPrincipalId
+          principalType: 'ServicePrincipal'
+          roleDefinitionIdOrName: 'Key Vault Secrets Officer'
+        }
+        {
+          principalId: deployPrincipalId
+          principalType: 'ServicePrincipal'
+          roleDefinitionIdOrName: 'Key Vault Certificates Officer'
+        }
+      ]
+    : []
+)
 
 // Purge protection is explicitly false and softDeleteRetentionInDays=7 so
 // scripts/lab/destroy.py can purge the vault cleanly during teardown.
@@ -166,6 +195,9 @@ module keyVault 'br/public:avm/res/key-vault/vault:0.9.0' = {
 output workloadIdentityResourceId string = workloadIdentity.outputs.resourceId
 output workloadIdentityClientId string = workloadIdentity.outputs.clientId
 output workloadIdentityPrincipalId string = workloadIdentity.outputs.principalId
+output appGwIdentityResourceId string = appGwIdentity.outputs.resourceId
+output appGwIdentityClientId string = appGwIdentity.outputs.clientId
+output appGwIdentityPrincipalId string = appGwIdentity.outputs.principalId
 
 output acrResourceId string = registry.outputs.resourceId
 output acrName string = registry.outputs.name

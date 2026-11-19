@@ -64,11 +64,13 @@ jobs:
           AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
           AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'westus3' }}
           AZURE_BOOTSTRAP_RESOURCE_GROUP: ${{ vars.AZURE_BOOTSTRAP_RESOURCE_GROUP || 'rg-apv-bootstrap-wus3-001' }}
-          AZURE_LAB_RESOURCE_GROUP: ${{ vars.AZURE_LAB_RESOURCE_GROUP || 'rg-apv-lab-wus3-001' }}
+          AZURE_LAB_RESOURCE_GROUP: ${{ vars.AZURE_LAB_RESOURCE_GROUP || 'rg-apim-assess-lab' }}
           LAB_ENTRA_GATEWAY_APP_ID: ${{ vars.LAB_ENTRA_GATEWAY_APP_ID }}
           LAB_ENTRA_MCP_APP_ID: ${{ vars.LAB_ENTRA_MCP_APP_ID }}
           LAB_ENTRA_A2A_APP_ID: ${{ vars.LAB_ENTRA_A2A_APP_ID }}
           LAB_ENTRA_CLIENT_APP_ID: ${{ vars.LAB_ENTRA_CLIENT_APP_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          LAB_CUSTOM_DOMAIN_ZONE: ${{ vars.LAB_CUSTOM_DOMAIN_ZONE || 'christopher-house.com' }}
         run: |
           SKIP_FLAG=""
           if [ "${{ inputs.skip_image_build }}" = "true" ]; then

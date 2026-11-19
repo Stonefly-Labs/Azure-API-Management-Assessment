@@ -398,12 +398,15 @@ def test_expectations_contract_covers_all_55_rules_and_validates_outcomes() -> N
 
 
 def test_destroy_guardrails_protect_bootstrap_and_unrelated_resource_groups() -> None:
+    validate_destroy_scope("rg-apim-assess-lab")
     validate_destroy_scope("rg-apv-lab-wus3-001")
     with pytest.raises(ValueError, match="protected bootstrap"):
         validate_destroy_scope("rg-apv-ops-wus3-001")
     with pytest.raises(ValueError, match="protected bootstrap"):
         validate_destroy_scope("rg-apv-bootstrap-wus3-001")
-    with pytest.raises(ValueError, match="outside the 'rg-apv-lab-\\*' prefix"):
+    with pytest.raises(
+        ValueError, match="outside the 'rg-apim-assess-lab' / 'rg-apv-lab-\\*' scope"
+    ):
         validate_destroy_scope("rg-production-shared-001")
 
 
@@ -434,6 +437,7 @@ def test_paired_lab_snapshot_evaluates_all_55_rules_against_expectations() -> No
         SubResource,
     )
     from apim_assess.models.snapshot import (
+        HostCertificate,
         Instance,
         MetricPoint,
         MetricSeries,
@@ -441,7 +445,12 @@ def test_paired_lab_snapshot_evaluates_all_55_rules_against_expectations() -> No
         Sku,
         Snapshot,
     )
-    from apim_assess.models.upstream import Upstream, UpstreamProbe
+    from apim_assess.models.upstream import (
+        Upstream,
+        UpstreamProbe,
+        UpstreamRoute,
+        WafConfiguration,
+    )
 
     sub_id = "00000000-0000-0000-0000-000000000000"
     rg = "rg-apv-lab-wus3-001"
@@ -726,7 +735,13 @@ def test_paired_lab_snapshot_evaluates_all_55_rules_against_expectations() -> No
         },
         service_settings=ServiceSettings(
             minimum_api_version=date(2018, 1, 1),
-            certificates=[],
+            certificates=[
+                HostCertificate(
+                    endpoint="Proxy",
+                    source="Custom",
+                    expires_at=now + timedelta(days=14),
+                )
+            ],
             portal_enabled=True,
             portal_signin_required=False,
             portal_signup_enabled=True,
@@ -1002,7 +1017,21 @@ def test_paired_lab_snapshot_evaluates_all_55_rules_against_expectations() -> No
         log_analytics=LogAnalytics(status="not_applicable", workspaces=[]),
         upstream=Upstream(
             afd=UpstreamProbe(status="complete", routes=[]),
-            appgw=UpstreamProbe(status="complete", routes=[]),
+            appgw=UpstreamProbe(
+                status="complete",
+                routes=[
+                    UpstreamRoute(
+                        reference=reference_id("agw-apv-lab-wus3-001/rule-dev"),
+                        provider="appgw",
+                        waf=WafConfiguration(
+                            enabled=True,
+                            prevention=False,
+                            managed_rules=True,
+                        ),
+                        network_restricted=True,
+                    )
+                ],
+            ),
         ),
         metrics=_metrics(classic=True),
     )
@@ -1226,7 +1255,13 @@ def test_paired_lab_snapshot_evaluates_all_55_rules_against_expectations() -> No
         },
         service_settings=ServiceSettings(
             minimum_api_version=date(2022, 8, 1),
-            certificates=[],
+            certificates=[
+                HostCertificate(
+                    endpoint="Proxy",
+                    source="KeyVault",
+                    expires_at=now + timedelta(days=89),
+                )
+            ],
             portal_enabled=True,
             portal_signin_required=True,
             portal_signup_enabled=False,
@@ -1491,7 +1526,21 @@ def test_paired_lab_snapshot_evaluates_all_55_rules_against_expectations() -> No
         ),
         upstream=Upstream(
             afd=UpstreamProbe(status="complete", routes=[]),
-            appgw=UpstreamProbe(status="complete", routes=[]),
+            appgw=UpstreamProbe(
+                status="complete",
+                routes=[
+                    UpstreamRoute(
+                        reference=reference_id("agw-apv-lab-wus3-001/rule-bv2"),
+                        provider="appgw",
+                        waf=WafConfiguration(
+                            enabled=True,
+                            prevention=True,
+                            managed_rules=True,
+                        ),
+                        network_restricted=None,
+                    )
+                ],
+            ),
         ),
         metrics=_metrics(classic=False),
     )
@@ -1517,3 +1566,111 @@ def test_paired_lab_snapshot_evaluates_all_55_rules_against_expectations() -> No
     summary = verify_findings_against_expectations(assessment, contract)
     assert summary.passed, summary.to_dict()
     assert summary.total_rules_checked == 110
+
+
+def test_short_lived_custom_pfx_and_cloudflare_dns_upsert() -> None:
+    import base64
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives.serialization import pkcs12
+
+    from scripts.lab.acme_cloudflare import (
+        CloudflareDnsClient,
+        ensure_keyvault_wildcard_certificate,
+        generate_short_lived_custom_pfx_base64,
+        upsert_lab_dns_records,
+    )
+
+    pfx_b64 = generate_short_lived_custom_pfx_base64(
+        hostname="api-dev.christopher-house.com",
+        validity_days=14,
+    )
+    private_key, cert, _ = pkcs12.load_key_and_certificates(base64.b64decode(pfx_b64), None)
+    assert private_key is not None
+    assert cert is not None
+    san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    assert san.get_values_for_type(x509.DNSName) == ["api-dev.christopher-house.com"]
+    days_valid = (cert.not_valid_after_utc - cert.not_valid_before_utc).days
+    assert days_valid == 14
+
+    state: dict[tuple[str, str], dict[str, Any]] = {}
+    txt_records: dict[str, str] = {}
+
+    def _cf_handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if request.method == "GET" and path == "/client/v4/zones":
+            return httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "result": [{"id": "zone-123", "name": "christopher-house.com"}],
+                },
+            )
+        if request.method == "GET" and path == "/client/v4/zones/zone-123/dns_records":
+            rtype = request.url.params.get("type", "")
+            rname = request.url.params.get("name", "")
+            rec = state.get((rtype, rname))
+            return httpx.Response(200, json={"success": True, "result": [rec] if rec else []})
+        if request.method in {"POST", "PUT"} and path.startswith(
+            "/client/v4/zones/zone-123/dns_records"
+        ):
+            import json as _json
+
+            payload = _json.loads(request.content.decode("utf-8"))
+            rtype = payload["type"]
+            rname = payload["name"]
+            rid = f"rec-{rtype}-{rname}"
+            if rtype == "TXT":
+                txt_records[rid] = payload["content"]
+                return httpx.Response(200, json={"success": True, "result": {"id": rid, **payload}})
+            saved = {"id": rid, **payload}
+            state[(rtype, rname)] = saved
+            return httpx.Response(200, json={"success": True, "result": saved})
+        if request.method == "DELETE" and path.startswith("/client/v4/zones/zone-123/dns_records/"):
+            rid = path.rsplit("/", 1)[-1]
+            txt_records.pop(rid, None)
+            return httpx.Response(200, json={"success": True, "result": {"id": rid}})
+        return httpx.Response(404, json={"success": False})
+
+    transport = httpx.MockTransport(_cf_handler)
+    cf = CloudflareDnsClient("fake-token", transport=transport)
+    zone_id = cf.get_zone_id("christopher-house.com")
+    assert zone_id == "zone-123"
+    txt_id = cf.create_txt_record(
+        zone_id,
+        name="_acme-challenge.christopher-house.com",
+        content="dns01-token-value",
+    )
+    assert txt_records[txt_id] == "dns01-token-value"
+    cf.delete_record(zone_id, txt_id)
+    assert txt_id not in txt_records
+    cf.close()
+
+    records = upsert_lab_dns_records(
+        cloudflare_api_token="fake-token",
+        zone_name="christopher-house.com",
+        appgw_public_ip="20.118.100.50",
+        apim_bv2_default_hostname="apim-apv-bv2-wus3-001.azure-api.net",
+        apim_dev_private_ip="10.240.1.4",
+        transport=transport,
+    )
+    assert len(records) == 4
+    assert state[("A", "agw-bv2.christopher-house.com")]["content"] == "20.118.100.50"
+    assert state[("A", "agw-dev.christopher-house.com")]["content"] == "20.118.100.50"
+    assert (
+        state[("CNAME", "api-bv2.christopher-house.com")]["content"]
+        == "apim-apv-bv2-wus3-001.azure-api.net"
+    )
+    assert state[("A", "api-dev.christopher-house.com")]["content"] == "10.240.1.4"
+
+    # Also verify idempotent Key Vault certificate reuse when valid cert already exists
+    sid = ensure_keyvault_wildcard_certificate(
+        vault_name="kv-apv-lab-test",
+        cert_name="wildcard-christopher-house-com",
+        cloudflare_api_token="",
+        run_az_fn=lambda args, **_kw: {
+            "sid": "https://kv-apv-lab-test.vault.azure.net/secrets/wildcard-christopher-house-com/v1",
+            "attributes": {"expires": "2099-01-01T00:00:00+00:00"},
+        },
+    )
+    assert sid == "https://kv-apv-lab-test.vault.azure.net/secrets/wildcard-christopher-house-com"

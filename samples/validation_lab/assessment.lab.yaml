@@ -15,8 +15,8 @@ modules:
     auto_discover: false
     resource_ids: []
   appgw:
-    enabled: false
-    auto_discover: false
+    enabled: true
+    auto_discover: true
     resource_ids: []
 
 telemetry:
